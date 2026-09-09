@@ -180,9 +180,11 @@ Commands come from three sources:
 
 - **Core built-ins:** `src/auto-reply/commands-registry.shared.ts`
 - **Plugin commands:** plugin `registerCommand()` calls
+- **Skill commands:** commands exported by installed skills, assembled in
+  `src/auto-reply/commands-registry-list.ts`
 
-Availability depends on config flags, channel surface, and installed/enabled
-plugins.
+Availability depends on config flags, channel surface, installed/enabled
+plugins, and installed skills.
 
 ### Core commands
 
@@ -400,7 +402,7 @@ use the Control UI Tools panel or config surfaces.
 
 Use `-s` to change only the current session, `-a` to also update the agent default, or `-g` to also update the shared global default. The long forms are `--session`, `--agent`, and `--global`; an explicit scope overrides `agents.defaults.modelSelectionScope`.
 
-Without a flag or that optional setting, `/model <model>` changes only the current session, including for owners/admins. Set `agents.defaults.modelSelectionScope` to `"agent"` or `"global"` only when you want unqualified selections to update that default. The setting does not grant permission to write configured defaults. See [Model selection scope](/gateway/config-agents#agentsdefaultsmodelselectionscope).
+Without a flag or that optional setting, `/model <model>` changes only the current session, including for owners/admins. Set `agents.defaults.modelSelectionScope` to `"agent"` or `"global"` only when you want unqualified selections to update that default. The setting does not grant permission to write configured defaults. See [Model selection scope](/gateway/config-agents/models#agentsdefaultsmodelselectionscope).
 
 In text commands, select a model by `provider/model` or a configured alias.
 Numeric selections such as `/model 3` are not supported.
@@ -519,7 +521,7 @@ the source and permits replacement of an existing install; it does not bypass
 are printed informationally; blocked releases remain non-installable.
 Marketplace, linked, and pinned installs remain shell-only.
 
-`/plugins inspect <child>` (also `show` or `get`) and `/plugins inspect all` include the shared package install metadata for multi-entry plugins. Inspection returns `install: null` when package ownership is missing or ambiguous, and preserves its runtime capability report.
+`/plugins inspect <child>` (also `show` or `get`) and `/plugins inspect all` include the shared package install metadata for multi-entry plugins. Inspection returns `install: null` when package ownership is missing or ambiguous, and preserves its runtime capability report. It releases its inspection registration resources before returning a reply, while the running Gateway's active registrations remain available. Cleanup failures propagate as command failures.
 
 When `/plugins install` or `/plugins enable` requires capability consent, it
 returns the plugin's declared capabilities and an exact retry command. Review

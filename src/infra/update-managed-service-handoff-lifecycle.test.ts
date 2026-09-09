@@ -80,6 +80,20 @@ vi.mock("./tmp-openclaw-dir.js", async (importOriginal) => ({
 const tempDirs = new Set<string>();
 const managedProcessCleanups = new Set<() => Promise<void>>();
 
+async function createUserSystemdFixture() {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-run-"));
+  tempDirs.add(home);
+  const unitPath = path.join(home, ".config", "systemd", "user", "openclaw-gateway.service");
+  await fs.mkdir(path.dirname(unitPath), { recursive: true });
+  await fs.writeFile(unitPath, "[Service]\nExecStart=/usr/bin/true\n");
+  const systemdRunPath = path.join(home, "systemd-run");
+  await fs.writeFile(systemdRunPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  return {
+    systemdRunPath,
+    env: { HOME: home, PATH: home, OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway.service" },
+  };
+}
+
 beforeEach(async () => {
   // Helpers in one fixture share a coordinator without touching the operator's database.
   const coordinatorDir = await fs.realpath(
@@ -227,13 +241,24 @@ describe("managed service update handoff", () => {
   );
 
   itUnix.each(["failed", "skipped"] as const)(
-    "leaves the serving generation untouched when validation finishes %s",
+    "finishes the update run without touching the serving generation when validation finishes %s",
     async (validationResult) => {
-      const { commands, parentSignal, log } = await runManagedServiceManagerBoundary("systemd", {
-        controlDisconnect: "transferred",
-        validationResult,
-        validationClockAdvanceMs: 10 * 60_000,
-        helperExitCode: validationResult === "failed" ? 1 : 0,
+      const { commands, parentSignal, log, run } = await runManagedServiceManagerBoundary(
+        "systemd",
+        {
+          controlDisconnect: "transferred",
+          ledger: true,
+          validationResult,
+          validationClockAdvanceMs: 10 * 60_000,
+          helperExitCode: validationResult === "failed" ? 1 : 0,
+        },
+      );
+      expect(run).toMatchObject({
+        status: validationResult,
+        phase: "finished",
+        reason:
+          validationResult === "failed" ? "managed-service-handoff-failed" : "already-current",
+        finishedAtMs: expect.any(Number),
       });
       expect(commands).toEqual([]);
       expect(parentSignal).toBeNull();
@@ -393,10 +418,7 @@ describe("managed service update handoff", () => {
     });
     let env: NodeJS.ProcessEnv | undefined;
     if (failure === "launcher exit") {
-      const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-run-bin-"));
-      tempDirs.add(binDir);
-      await fs.writeFile(path.join(binDir, "systemd-run"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-      env = { PATH: binDir, OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway.service" };
+      env = (await createUserSystemdFixture()).env;
     }
     const { startManagedServiceUpdateHandoff } =
       await import("./update-managed-service-handoff.js");
@@ -489,10 +511,7 @@ describe("managed service update handoff", () => {
   it("launches systemd handoffs through a transient user scope", async () => {
     const { startManagedServiceUpdateHandoff } =
       await import("./update-managed-service-handoff.js");
-    const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-systemd-run-bin-"));
-    tempDirs.add(binDir);
-    const systemdRunPath = path.join(binDir, "systemd-run");
-    await fs.writeFile(systemdRunPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const { env, systemdRunPath } = await createUserSystemdFixture();
 
     const result = await startManagedServiceUpdateHandoff({
       root: MOCK_INSTALL_ROOT,
@@ -506,8 +525,7 @@ describe("managed service update handoff", () => {
       channel: "beta",
       supervisor: "systemd",
       env: {
-        PATH: binDir,
-        OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway.service",
+        ...env,
         INVOCATION_ID: "gateway-invocation",
         KEEP_ME: "1",
       },

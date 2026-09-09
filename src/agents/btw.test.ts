@@ -3,7 +3,9 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { consumeReplyUsageState } from "../auto-reply/reply/reply-usage-state.js";
 import type { SessionEntry } from "../config/sessions.js";
+import { onInternalDiagnosticEvent } from "../infra/diagnostic-events.js";
 import type { ProviderResolveModelRoutesContext } from "../plugin-sdk/provider-model-types.js";
 import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
@@ -1263,6 +1265,98 @@ describe("runBtwSideQuestion", () => {
     );
   });
 
+  it.each(
+    ["harness", "direct", "direct-block"].flatMap((mode) =>
+      [false, true, undefined].map((enabled) => ({ mode, enabled })),
+    ),
+  )(
+    "exposes $mode side-question usage with diagnostics enabled: $enabled",
+    async ({ mode, enabled }) => {
+      const tokens = { input: 13, output: 9, cacheRead: 7, cacheWrite: 3 };
+      const usage = { ...tokens, total: 41 };
+      const cost = { input: 0.1, output: 0.1, cacheRead: 0.03, cacheWrite: 0.02, total: 0.25 };
+      const text = "Side answer.";
+      const onBlockReply = vi.fn().mockResolvedValue(undefined);
+      if (mode === "harness") {
+        registerCodexSideQuestionHarness().mockResolvedValue({ text, usage: { ...usage, cost } });
+      } else {
+        const done = createDoneEvent(text);
+        done.message.usage = { ...tokens, totalTokens: 41, cost };
+        streamSimpleMock.mockReturnValue(
+          makeAsyncEvents([
+            ...(mode === "direct-block"
+              ? [
+                  { type: "text_delta", delta: text },
+                  { type: "text_end", content: text, contentIndex: 0 },
+                ]
+              : []),
+            done,
+          ]),
+        );
+      }
+      const runId = `btw-usage-reply-${mode}-${enabled}`;
+      const authorityRunId = `btw-usage-authority-${mode}-${enabled}`;
+      const sessionEntry = createSessionEntry({ inputTokens: 200, cacheRead: 100 });
+      const originalEntry = structuredClone(sessionEntry);
+      const diagnostics: unknown[] = [];
+      const unsubscribe = onInternalDiagnosticEvent((event) => {
+        if (event.type === "model.usage") {
+          diagnostics.push(event);
+        }
+      });
+      try {
+        await expect(
+          runSideQuestion({
+            cfg: { diagnostics: { enabled } },
+            sessionEntry,
+            authorityRunId,
+            ...(mode === "direct-block"
+              ? {
+                  blockReplyChunking: {
+                    minChars: 1,
+                    maxChars: 200,
+                    breakPreference: "paragraph" as const,
+                  },
+                  resolvedBlockStreamingBreak: "text_end" as const,
+                }
+              : {}),
+            opts: { runId, onBlockReply },
+          }),
+        ).resolves.toEqual(mode === "direct-block" ? undefined : { text });
+        if (mode === "direct-block") {
+          expect(onBlockReply).toHaveBeenCalledExactlyOnceWith({
+            text,
+            btw: { question: DEFAULT_QUESTION },
+          });
+        }
+        expect.soft(consumeReplyUsageState(runId)).toMatchObject({
+          usage,
+          sessionId: "session-1",
+          turnUsd: 0.25,
+        });
+        expect(consumeReplyUsageState(authorityRunId)).toBeUndefined();
+        expect(sessionEntry).toEqual(originalEntry);
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+        expect.soft(diagnostics).toEqual(
+          enabled !== false
+            ? [
+                expect.objectContaining({
+                  type: "model.usage",
+                  sessionId: "session-1",
+                  usage: { ...usage, promptTokens: 23 },
+                  costUsd: 0.25,
+                }),
+              ]
+            : [],
+        );
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
+
   it("keeps an unprofiled subscription token on the OpenClaw BTW path", async () => {
     const supports = vi.fn(supportsPreparedOpenAIAuth);
     const codexSideQuestionMock = registerCodexSideQuestionHarness({ supports });
@@ -1826,31 +1920,39 @@ describe("runBtwSideQuestion", () => {
     expect(registerProviderStreamForModelMock).not.toHaveBeenCalled();
   });
 
-  it("preserves the explicit no-timeout override for CLI-runtime BTW", async () => {
-    mockCliOutput({ text: "CLI side answer." });
+  it.each([
+    { options: { timeoutOverrideSeconds: 0 }, expected: MAX_TIMER_TIMEOUT_MS },
+    { options: { timeoutOverrideMs: 0 }, expected: MAX_TIMER_TIMEOUT_MS },
+    { options: { timeoutOverrideMs: 1500 }, expected: 1500 },
+    { options: { timeoutOverrideSeconds: 1800, timeoutOverrideMs: 1500 }, expected: 1500 },
+  ])(
+    "preserves the timeout override $options for CLI-runtime BTW",
+    async ({ options, expected }) => {
+      mockCliOutput({ text: "CLI side answer." });
 
-    await runSideQuestion({
-      cfg: {
-        agents: {
-          defaults: {
-            models: {
-              "anthropic/claude-opus-4-7": { agentRuntime: { id: "claude-cli" } },
+      await runSideQuestion({
+        cfg: {
+          agents: {
+            defaults: {
+              models: {
+                "anthropic/claude-opus-4-7": { agentRuntime: { id: "claude-cli" } },
+              },
             },
           },
-        },
-      } as never,
-      model: "claude-opus-4-7",
-      opts: { timeoutOverrideSeconds: 0 },
-      sessionKey: DEFAULT_SESSION_KEY,
-    });
+        } as never,
+        model: "claude-opus-4-7",
+        opts: options,
+        sessionKey: DEFAULT_SESSION_KEY,
+      });
 
-    const prepareParams = mockArg(prepareCliRunContextMock, 0, 0) as {
-      timeoutMs?: unknown;
-      runTimeoutOverrideMs?: unknown;
-    };
-    expect(prepareParams.timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
-    expect(prepareParams.runTimeoutOverrideMs).toBe(MAX_TIMER_TIMEOUT_MS);
-  });
+      const prepareParams = mockArg(prepareCliRunContextMock, 0, 0) as {
+        timeoutMs?: unknown;
+        runTimeoutOverrideMs?: unknown;
+      };
+      expect(prepareParams.timeoutMs).toBe(expected);
+      expect(prepareParams.runTimeoutOverrideMs).toBe(expected);
+    },
+  );
 
   it("runs auth-order-selected CLI BTW through the CLI side-question path", async () => {
     const { cleanup } = mockCliOutput({ text: "CLI auth-order side answer." });

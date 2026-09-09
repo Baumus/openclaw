@@ -5,6 +5,7 @@ import * as agentEn from "./en-agents.ts";
 
 export const en: TranslationMap & {
   configPage: TranslationMap;
+  connection: TranslationMap;
   configView: TranslationMap;
   debug: TranslationMap & { overlay: TranslationMap };
   // Lazy en-devices.ts assigns into this namespace.
@@ -113,6 +114,11 @@ export const en: TranslationMap & {
     probeOk: "Probe ok",
     probeFailed: "Probe failed",
     reloadConfig: "Reload Config",
+    multiSelect: {
+      addCustom: "Add “{value}”",
+      noMatches: "No matches",
+      remove: "Remove {value}",
+    },
     loadConfig: "Load config",
     loadApprovals: "Load approvals",
     settingsSections: "Settings sections",
@@ -122,6 +128,7 @@ export const en: TranslationMap & {
     colorMode: "Color mode",
     colorModeOption: "Color mode: {mode}",
     search: "Search",
+    pickerNoMatches: "No matches",
     save: "Save",
     saving: "Saving…",
     saveAndPublish: "Save & Publish",
@@ -193,7 +200,7 @@ export const en: TranslationMap & {
   },
   nativeLinkMenu: {
     label: "Link actions",
-    openInline: "Open in Sidebar",
+    openInline: "Open in Browser Panel",
     openExternal: "Open in Default Browser",
     copy: "Copy Link",
   },
@@ -463,11 +470,6 @@ export const en: TranslationMap & {
         "Logging out of account {accountId} stops its listener and deletes its saved credentials.",
       logoutNotCleared:
         "No stored WhatsApp session was cleared. It may already be absent, or its auth directory may require manual cleanup.",
-    },
-    gatewayUrlConfirmation: {
-      title: "Change Gateway URL",
-      subtitle: "This will reconnect to a different gateway server",
-      warning: "Only confirm if you trust this URL. Malicious URLs can compromise your system.",
     },
     nostr: {
       title: "Nostr",
@@ -943,6 +945,8 @@ export const en: TranslationMap & {
     gatewayNamed: "Gateway · {name}",
     cloudWorker: "Cloud · {profile}",
     cloudWorkerMachine: "{profile} · {machine}",
+    cloudWorkerOsMachine: "{profile} · {os} · {machine}",
+    cloudWorkerOs: "{profile} · {os}",
     cloudWorkerProvider: "Cloud worker provider: {provider}",
     cloudRuntimeUnsupported: "The {runtime} runtime does not support cloud workers.",
     cloudProfileRuntimeUnsupported:
@@ -991,6 +995,7 @@ export const en: TranslationMap & {
     registerProject: "Register as project",
     cloud: "Cloud",
     machine: "Machine",
+    operatingSystem: "Operating system",
     machineShape: "{cpu} vCPU · {memory} GB",
     machineCpu: "{cpu} vCPU",
     machineMemory: "{memory} GB",
@@ -1216,6 +1221,9 @@ export const en: TranslationMap & {
     tokensBefore: "{count} tokens before",
     tokenDeltaUnavailable: "token delta unavailable",
     contextUsage: "{percent}% of context used ({used} / {context} tokens)",
+    promptBudgetUsage: "{percent}% of last-run prompt budget used ({used} / {context} tokens)",
+    promptBudgetUsageApprox:
+      "Approximately {percent}% of last-run prompt budget used ({used} / {context} tokens)",
     contextUsageApprox: "~{percent}% of context used ({used} / {context} tokens, approximate)",
     checkpoints: "{count} Checkpoints",
     checkpoint: "{count} Checkpoint",
@@ -1469,6 +1477,7 @@ export const en: TranslationMap & {
       inheritDefault: "Inherit default",
       inheritDefaultModel: "Inherit default ({model})",
       fallbacks: "Fallbacks",
+      addFallback: "Add fallback…",
     },
     toolCatalog: {
       groups: {
@@ -1554,6 +1563,8 @@ export const en: TranslationMap & {
       agentJobsSubtitle: "Scheduled jobs targeting this agent.",
       noJobs: "No jobs assigned.",
       runNow: "Run Now",
+      edit: "Edit",
+      editJob: "Edit {name}",
     },
     files: {
       emptyDraft: "Empty draft",
@@ -1584,6 +1595,9 @@ export const en: TranslationMap & {
       content: "Content",
       words: "{count} words",
       lines: "lines",
+      overwrite: "Overwrite",
+      conflictHint:
+        "This file changed in the agent workspace after this draft was started. Reload to take the workspace version, or Overwrite to replace it with this draft.",
     },
   },
   debug: {
@@ -2196,6 +2210,8 @@ export const en: TranslationMap & {
     settings: "Settings",
     askOpenClaw: "Ask OpenClaw",
     settingsGroupDevice: "This Mac",
+    settingsGroupThisIPhone: "This iPhone",
+    settingsGroupThisIPad: "This iPad",
     settingsGroupThisDevice: "This device",
     settingsGroupConnections: "Connections",
     settingsGroupAgents: "Agents & Tools",
@@ -2230,6 +2246,8 @@ export const en: TranslationMap & {
     uploadProgress: "Uploading {current} of {total}",
     uploadFailed: "Upload failed",
     retryUpload: "Retry",
+    insertUploadedPaths: "Insert uploaded paths",
+    uploadExpired: "Uploaded files may have expired. Cancel this batch and choose the files again.",
     closeSession: "Close terminal session",
     sessions: "Terminal sessions",
     refreshSessions: "Refresh",
@@ -2261,12 +2279,17 @@ export const en: TranslationMap & {
     uploadTooLarge: "File exceeds the 16 MiB terminal upload limit: {file}",
     uploadUnsafeCmdPath: "Cannot safely insert an uploaded path containing % or ! into cmd.exe",
     uploadUnsupportedShell: "Cannot safely insert an uploaded path into unsupported shell: {shell}",
+    uploadInvalidNativePath: "Cannot safely insert the uploaded native file path",
   },
   browser: {
+    nativeTab: "Mac tab",
+    remoteTab: "Agent browser tab",
+    stop: "Stop loading",
     profile: "Browser profile: {profile}",
     navigationBlocked:
       "The current browser navigation rules block this address. Select another tab or enter an allowed address.",
     navigationCheckFailed: "OpenClaw couldn’t verify this tab’s address. Refresh to try again.",
+    tabUnavailable: "This tab is no longer available. Select another tab.",
     title: "Browser",
     open: "Open",
     openPanel: "Open browser panel",
@@ -3195,6 +3218,7 @@ export const en: TranslationMap & {
       progress: "{complete} of {total}",
       active: "{running} running · {queued} queued · {failed} failed",
       finished: "{done} completed · {failed} failed",
+      completed: "{done} completed",
       childOutcome: "Child runs finished. Check the conversation for the final response.",
       details: "Child details",
       detailsUnavailable: "Child details are unavailable. Counts include all accepted workers.",
@@ -3240,7 +3264,7 @@ export const en: TranslationMap & {
     workerDesktop: {
       title: "Cloud Worker Desktop",
       description:
-        "Watch and control node-carried desktops from capable Crabbox AWS or Hetzner profiles with desktop: true.",
+        "Watch and control node-carried desktops from capable Crabbox AWS, Azure, or Hetzner profiles with desktop: true.",
     },
   },
   aboutPage: {
@@ -3336,6 +3360,10 @@ export const en: TranslationMap & {
     },
   },
   presence: {
+    sharedOwner: {
+      name: "Shared owner",
+      hint: "Connected with the Gateway token or over a tunnel, not a personal sign-in.",
+    },
     rosterTitle: "Online",
     idle: "Idle",
     offline: "Offline",
@@ -3569,6 +3597,7 @@ export const en: TranslationMap & {
     header: {
       selfLearning: "Self-learning",
       selfLearningAria: "Toggle autonomous self-learning",
+      weeklyReviewsPaused: "Weekly reviews paused. Enable cron in Automation settings.",
       selfLearningTooltip:
         "Capture corrections and review completed work as reusable skills. Automatic mode applies scanner-approved captures to Skills.",
     },
@@ -3670,6 +3699,8 @@ export const en: TranslationMap & {
       supportFiles: "{count} support files",
       noSupportFiles: "0 support files",
       loading: "Loading\u2026",
+      draftMissing:
+        "This suggestion's draft is missing. Reject it and ask your agent to create a new suggestion.",
       supportFilesTitle: "Support files",
       clickToPreview: "\u00b7 click to preview",
     },
@@ -3716,25 +3747,18 @@ export const en: TranslationMap & {
     selfLearning: {
       pitchTitle: "Turn on self-learning",
       pitchBody:
-        "OpenClaw reviews corrections and substantial completed runs, then applies scanner-approved skills and lists them here. Experience review spends extra background tokens.",
+        "OpenClaw learns from completed work and improves reusable skills in the background. Reviews use your configured model.",
       enable: "Enable self-learning",
       enabling: "Enabling\u2026",
       updateError: "Could not update the self-learning setting.",
     },
-    history: {
-      eyebrow: "Past work",
-      title: "Find reusable workflows",
-      body: "Review substantial sessions from newest to oldest. Only strong recovery patterns or workflows that save repeated tool calls become suggestions.",
-      findIdeas: "Find skill ideas",
-      scanEarlier: "Scan earlier work",
-      scanNew: "Scan new work",
-      scanning: "Reviewing sessions\u2026",
-      loading: "Loading history\u2026",
-      pendingOnly: "Creates suggestions only. Uses your configured model.",
-      reviewed: "{count} sessions reviewed",
-      found: "{count} ideas found",
-      noSessions: "No substantial sessions found in this window.",
-      today: "today",
+    learning: {
+      start: "Learn from past conversations",
+      starting: "Opening learning session\u2026",
+      title: "Learn from past conversations",
+      description:
+        "Open a session to find useful lessons and improve skills using your current learning mode.",
+      startFailed: "Could not start learning. Check your sessions before trying again.",
     },
   },
   // Chat swarm summaries render before the lazy Activity catalog loads.
@@ -3862,6 +3886,7 @@ export const en: TranslationMap & {
       retry: "Retry",
       frameResolverMissing: "Widget content is unavailable.",
       sandboxUnavailable: "Widget sandbox host is unavailable.",
+      runtimeError: "Script error: {message}",
       frameAuthorizationFailed: "Widget authorization failed after repeated refresh attempts.",
       sandboxOriginRequired:
         "Widget authorization failed after repeated refresh attempts. If the gateway runs behind a reverse proxy or tunnel that does not route the widget sandbox port, set mcp.apps.sandboxOrigin to a dedicated public origin routed to the sandbox listener.",
@@ -3880,6 +3905,7 @@ export const en: TranslationMap & {
   },
   connection: {
     disconnectedTitle: "Disconnected",
+    connecting: "Connecting…",
     queuedCount: "{count} queued",
     reconnecting: "Reconnecting…",
     restarting: "Restarting…",
@@ -3912,36 +3938,24 @@ export const en: TranslationMap & {
       expired: "The administrator access request expired.",
       error: "Administrator access request failed: {error}",
     },
-    access: {
-      title: "Gateway Access",
-      subtitle: "Where the dashboard connects and how it authenticates.",
-      wsUrl: "WebSocket URL",
-      token: "Gateway Token",
-      password: "Password (not stored)",
-      passwordPlaceholder: "system or shared password",
-      sessionKey: "Default Session Key",
-      connectHint: "Click Connect to apply connection changes.",
-      trustedProxy: "Authenticated via trusted proxy.",
-      showToken: "Show token",
-      hideToken: "Hide token",
-      toggleTokenVisibility: "Toggle token visibility",
-      showPassword: "Show password",
-      hidePassword: "Hide password",
-      togglePasswordVisibility: "Toggle password visibility",
-    },
-    snapshot: {
-      title: "Snapshot",
-      subtitle: "Latest gateway handshake information.",
-      status: "Status",
-      tickInterval: "Tick Interval",
-      lastChannelsRefresh: "Last Channels Refresh",
-      lastError: "Last error",
+    // Settings → Gateway copy lives in the lazy en-settings catalog; the anchor keeps its merge target.
+    access: {},
+    switchGateway: {
+      title: "Switch to a different Gateway?",
+      summary: "This link asks the browser to connect somewhere else.",
+      current: "Current",
+      next: "Link",
+      note: "Anything you enter after switching goes to that host.",
+      noteToken: "The link also carries a token for it.",
+      noteScoped: "Your saved credential for {host} stays here and is not sent.",
+      confirm: "Switch to {host}",
+      cancel: "Keep current Gateway",
     },
     help: {
       title: "How to connect",
       step1: "Start the gateway on your host machine:",
       step2: "Get a tokenized dashboard URL:",
-      step3: "Paste the WebSocket URL and token above, or open the tokenized URL directly.",
+      step3: "Paste the Gateway URL and secret above, or open that URL directly.",
       docsLink: "Read the docs →",
       copyCommand: "Copy command",
       copyCommandAria: "Copy command: {command}",
@@ -3978,7 +3992,7 @@ export const en: TranslationMap & {
       emptyTitle: "No mentions yet",
       emptyBody: "When someone mentions you in a chat, it appears here.",
       retention:
-        "Mentions are temporary: kept for up to seven days and cleared when the Gateway restarts.",
+        "Mentions are kept for up to seven days. Gateway restarts preserve your Inbox and dismissals.",
       notifications: "Notification settings",
       loading: "Loading mentions…",
       unavailable: "Sign in and connect to the Gateway to see your mentions.",
@@ -4608,9 +4622,8 @@ export const en: TranslationMap & {
       sat: "Sat",
     },
   },
-  login: {
-    subtitle: "Gateway Dashboard",
-  },
+  // Login copy lives in the lazy en-login catalog; the anchor keeps its merge target.
+  login: {},
   chat: {
     modelAccounts: {
       label: "Account for this chat",
@@ -4620,7 +4633,6 @@ export const en: TranslationMap & {
     },
     mentions: {
       menu: "Mention a person",
-      loading: "Loading people…",
       empty: "No eligible people found.",
       truncated: "Keep typing to find more people.",
       online: "Online",
@@ -4763,6 +4775,7 @@ export const en: TranslationMap & {
         outputTokens: "Output: {count} tokens",
         totalTokens: "Total: {count} tokens",
         context: "Context: {percent} of {total}",
+        promptBudget: "Prompt budget (last run): {percent} of {total}",
         model: "Model: {model}",
         failed: "Failed to get usage: {error}",
       },
@@ -4903,6 +4916,9 @@ export const en: TranslationMap & {
       sessionMenu: "External session actions",
       openInOpenClaw: "Open in OpenClaw",
       openInTerminal: "Open in terminal",
+      deleteSession: "Delete",
+      deleteSessionConfirm:
+        "Delete this external session from OpenClaw? Make sure no other runner is using it. Beamed sessions are deleted permanently. Sessions kept by another tool, such as Codex, are archived there and may be restorable.",
       terminalUnavailable: "Terminal opening is unavailable for this session.",
     },
     taskSuggestions: {
@@ -5308,6 +5324,7 @@ export const en: TranslationMap & {
       actions: "Message actions",
       selectionActions: "Selection actions",
       askInSideChat: "Ask in side chat",
+      addToChat: "Add to chat",
       rewind: "Rewind",
       rewindConfirm: "Rewind to before this message?",
       dontAskAgain: "Don't ask again",
@@ -5369,6 +5386,7 @@ export const en: TranslationMap & {
         "This model can chat, but it cannot use tools. Choose another model for files, commands, web, or media tasks.",
       loadingModels: "Loading models…",
       modelsUnavailable: "Models unavailable",
+      modelsRefreshFailed: "Some models could not be refreshed. Open Models to try again.",
       noModelsAvailable: "No models available",
       emptyModelsAction: "Manage models",
       providerModels: "{provider} models",
@@ -5527,6 +5545,8 @@ export const en: TranslationMap & {
         "Use arrow keys to choose a marker, Enter or Space to jump, and Escape to dismiss the preview.",
     },
     pendingInputs: {
+      waitingForWorkspaceSync: "Received · waiting for workspace sync",
+      waitingForWorkerSetup: "Received · waiting for worker setup",
       resuming:
         "Interrupted by a Gateway restart. This saved message will resume when the session is ready.",
       cancelled:
@@ -5626,6 +5646,7 @@ export const en: TranslationMap & {
         open: "Open context usage details",
         summary: "Session context usage: {used} of {limit} ({pct}%)",
         contextWindow: "Context window",
+        promptBudget: "Prompt budget (last run)",
         latestRunTokens: "Latest run tokens",
         estimatedCost: "Est. cost",
         planUsage: "Plan usage",
@@ -5716,6 +5737,8 @@ export const en: TranslationMap & {
       expand: "Open {filename} in the side panel",
       open: "Open",
       previewUnavailable: "Preview unavailable",
+      textPreviewUnavailable:
+        "Could not preview this file. Text previews require UTF-8 files up to 256 KiB. Download it to read the full file.",
       readFailed: "Could not attach: {names}{more}",
       tooLarge: "Too large to send: {names}{more}",
       showInTextField: "Show in text field",

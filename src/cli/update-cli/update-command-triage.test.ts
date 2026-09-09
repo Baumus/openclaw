@@ -21,6 +21,10 @@ const runInteractiveUpdateFailureAction = vi.hoisted(() =>
 );
 
 vi.mock("./update-command-report.js", () => ({ runInteractiveUpdateFailureAction }));
+vi.mock("@clack/prompts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@clack/prompts")>()),
+  confirm: async () => true,
+}));
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
@@ -103,6 +107,32 @@ it.each<{
       },
     },
     allowed: false,
+  },
+  {
+    name: "verified rollback",
+    result: {
+      reason: "restart-unhealthy",
+      recovery: {
+        serviceRestartSafe: true,
+        packageRollbackVerified: true,
+        version: "2026.9.1",
+        service: "healthy",
+      },
+    },
+    allowed: false,
+  },
+  {
+    name: "restored generation still unverified",
+    result: {
+      reason: "restart-unhealthy",
+      recovery: {
+        serviceRestartSafe: true,
+        packageRollbackVerified: true,
+        version: "2026.9.1",
+        service: "failed",
+      },
+    },
+    allowed: true,
   },
 ])("keeps automatic admission within update ownership: $name", (trial) => {
   const context = resolveAutomaticUpdateTriage({ ...failedUpdate, ...trial.result }, undefined, {
