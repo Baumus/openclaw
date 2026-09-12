@@ -255,8 +255,9 @@ describe("Memory Wiki compiled cache lifecycle", () => {
       const readFile = fs.readFile;
       const spy = vi.spyOn(fs, "readFile").mockImplementation(async (...args) => {
         const content = await readFile(...args);
-        if (sourcePaths.includes(String(args[0]))) {
-          sourceReads.push(String(args[0]));
+        const file = args[0];
+        if (typeof file === "string" && sourcePaths.includes(file)) {
+          sourceReads.push(file);
           expect(args[1]).toEqual({ signal: controller.signal });
           if (sourceReads.length === abortAtRead) {
             controller.abort(reason);
