@@ -1,6 +1,11 @@
 import { writeSync } from "node:fs";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { UPDATE_RUN_ID_ENV } from "../../infra/update-control-plane-sentinel.js";
+import { UpdateDoctorError } from "../../infra/update-doctor-result.js";
+import {
+  createUpdateFailureFact,
+  type UpdateFailureFact,
+} from "../../infra/update-failure-facts.js";
 import { readUpdateRunDriver, type UpdateRunDriver } from "../../infra/update-run-driver.js";
 import {
   adoptUpdateRun,
@@ -18,18 +23,19 @@ import { getPendingCliDisposers } from "../runtime-cleanup.js";
 import { UpdateFinalizationOutput } from "./update-finalization-output.js";
 import { inspectUpdateFinalizationChildren } from "./update-finalization-processes.js";
 
-// Local metadata/backup/completion work gets 30s; Doctor gets 2m for migrations,
-// registry installs get 10m, and convergence gets 3m for Doctor + validation.
+// Repair Doctor has no automatic deadline, including its enclosing convergence
+// phase. Other phases remain bounded; an explicit timeout applies to every phase.
 const PHASE_BUDGET_MS = {
   preflight: 30_000,
   targetConfigValidation: 30_000,
   configSnapshot: 30_000,
-  doctor: 120_000,
+  doctor: undefined,
   plugins: 600_000,
-  targetConfigConvergence: 180_000,
+  targetConfigConvergence: undefined,
   completionCache: 30_000,
 };
 type Phase = keyof typeof PHASE_BUDGET_MS;
+type DoctorPhase = "doctor" | "targetConfigConvergence";
 type Outcome = "completed" | "failed" | "warning" | "skipped" | "deferred";
 
 export class UpdateFinalizationLifecycle {
@@ -81,11 +87,13 @@ export class UpdateFinalizationLifecycle {
     status: "in_progress" | "completed" | "failed",
     at: number,
     detail?: string,
+    failureFacts?: UpdateFailureFact[],
   ): void {
     const step = {
       step: active.step,
       status,
       ...(detail ? { detail } : {}),
+      ...(failureFacts?.length ? { failureFacts } : {}),
       ...(status === "in_progress" ? { startedAtMs: at } : { endedAtMs: at }),
     };
     defaultRuntime.error(`[update finalize] ${JSON.stringify(step)}`);
@@ -98,11 +106,30 @@ export class UpdateFinalizationLifecycle {
     }
   }
 
-  budget(phase: Phase): number {
-    return Math.min(this.timeoutMs ?? PHASE_BUDGET_MS[phase], 2_147_483_647);
+  recordWarnings(warnings: readonly string[], phase: "doctor" | "plugins" = "doctor"): void {
+    warnings.forEach((detail, index) => {
+      this.record(
+        { phase, step: `warning:finalize:${phase}:${index}` },
+        "completed",
+        Date.now(),
+        detail,
+      );
+    });
   }
 
-  async run<T>(phase: Phase, run: () => Promise<T>, outcome?: (result: T) => Outcome): Promise<T> {
+  budget(phase: DoctorPhase): number | undefined;
+  budget(phase: Exclude<Phase, DoctorPhase>): number;
+  budget(phase: Phase): number | undefined;
+  budget(phase: Phase): number | undefined {
+    const budgetMs = this.timeoutMs ?? PHASE_BUDGET_MS[phase];
+    return budgetMs === undefined ? undefined : Math.min(budgetMs, 2_147_483_647);
+  }
+
+  async run<T>(
+    phase: Phase,
+    run: () => Promise<T>,
+    outcome?: (result: T) => Outcome | { outcome: Outcome; failureFacts?: UpdateFailureFact[] },
+  ): Promise<T> {
     const startedAt = performance.now();
     const startedAtMs = Date.now();
     const budgetMs = this.budget(phase);
@@ -125,17 +152,23 @@ export class UpdateFinalizationLifecycle {
       }
     }, UPDATE_RUN_HEARTBEAT_MS);
     heartbeat.unref();
-    const end = (result: Outcome, detail?: string) => {
+    const end = (result: Outcome, detail?: string, failureFacts?: UpdateFailureFact[]) => {
       this.phaseTimings.push({
         phase,
         startedOffsetMs: Math.max(0, Math.round(startedAt - this.startedAt)),
         durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
         outcome: result,
       });
-      this.record(active, result === "failed" ? "failed" : "completed", Date.now(), detail);
+      this.record(
+        active,
+        result === "failed" ? "failed" : "completed",
+        Date.now(),
+        detail,
+        failureFacts,
+      );
     };
     // Borrowed invocations keep awaiting the phase without taking over their host's lifetime.
-    if (hasCliProcessScope()) {
+    if (budgetMs !== undefined && hasCliProcessScope()) {
       this.timer = setTimeout(() => {
         // Do not race and unwind a still-mutating phase. Kill owned subprocesses and
         // exit without yielding, so late awaits cannot write into an OCM rollback.
@@ -149,10 +182,12 @@ export class UpdateFinalizationLifecycle {
             this.stopChildren();
           }
           const doctorOutput = output.snapshot();
+          const error = `Update finalization timed out in ${phase} after ${budgetMs}ms`;
           // Persist received output with the failed phase before the existing finish.
           // Child inventory remains separate and is never process-kill authority.
-          end("failed", doctorOutput ? formatDoctorOutputDetail(doctorOutput) : undefined);
-          const error = `Update finalization timed out in ${phase} after ${budgetMs}ms`;
+          end("failed", doctorOutput ? formatDoctorOutputDetail(doctorOutput) : undefined, [
+            createUpdateFailureFact({ check: phase, code: "finalization-timeout", message: error }),
+          ]);
           this.finishLedger(1, error);
           writeSync(2, `${error}\n`);
           if (doctorOutput) {
@@ -176,10 +211,25 @@ export class UpdateFinalizationLifecycle {
     }
     try {
       const result = await output.run(run);
-      end(outcome?.(result) ?? "completed");
+      const completed = outcome?.(result) ?? "completed";
+      end(
+        typeof completed === "string" ? completed : completed.outcome,
+        undefined,
+        typeof completed === "string" ? undefined : completed.failureFacts,
+      );
       return result;
     } catch (error) {
-      end("failed");
+      const facts =
+        error instanceof UpdateDoctorError
+          ? error.failureFacts
+          : [
+              createUpdateFailureFact({
+                check: phase,
+                code: "finalization-failed",
+                message: formatErrorMessage(error),
+              }),
+            ];
+      end("failed", undefined, facts);
       throw error;
     } finally {
       clearInterval(heartbeat);

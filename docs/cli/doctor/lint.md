@@ -13,7 +13,7 @@ This page covers lint output, check selection, and post-upgrade probes.
 
 Bare `openclaw doctor --json` is read-only and non-interactive: no prompts, repairs, or config/state rewrites. It emits the same default findings as lint mode, but exits `0` after a report is produced so output formatting does not change ordinary Doctor's advisory success contract. Read the payload's `ok` and `findings` fields to determine health.
 
-Explicit `openclaw doctor --lint` is the deployment-preflight posture. Add `--json` for machine-readable output without changing lint's threshold-based exit code.
+Explicit `openclaw doctor --lint` is the deployment-preflight posture. Add `--json` for machine-readable output without changing lint's threshold-based exit code. Policy findings reported here are documented in [`openclaw policy`](/cli/policy).
 
 ```bash
 openclaw doctor --json
@@ -69,6 +69,8 @@ Explicit lint exit codes:
 | `2`  | Command/runtime failure before lint findings can be produced. |
 
 `--severity-min` controls both which findings print and the exit threshold: `openclaw doctor --lint --severity-min error` can print nothing and exit `0` even when lower-severity `info`/`warning` findings exist.
+
+When the updater runs lint, warning-severity findings below its error threshold are retained in a separate JSON `warnings` array. They do not change the lint exit code. The updater records these advisories in its run history, including intentional open channel policies, so they remain available in `openclaw update status`. Ordinary standalone lint keeps the selected output threshold.
 
 Bare `openclaw doctor --json` exits `0` once it emits a findings payload, including when `ok` is `false`. Argument errors or runtime failures before a payload can be produced remain nonzero.
 

@@ -28,6 +28,8 @@ import {
 } from "../../sessions/user-turn-transcript.js";
 import { buildChannelUserTurnSender } from "../../sessions/user-turn-transcript.metadata.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
+import { getGroupThreadTurn } from "../group-thread-context.js";
+import { resolveInternalTurnTranscript } from "../internal-turn-source.js";
 import type { OriginatingChannelType } from "../templating.js";
 import { resolveCurrentTurnImages } from "./current-turn-images.js";
 import { resolveEffectiveReplyRoute } from "./effective-reply-route.js";
@@ -302,7 +304,12 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
           ...(sourceTurnId ? { idempotencyKey: sourceTurnId } : {}),
           ...(inputProvenance && !isHeartbeat ? { provenance: inputProvenance } : {}),
           ...(isHeartbeat
-            ? { provenance: { kind: "internal_system" as const, sourceTool: "heartbeat" } }
+            ? {
+                provenance: resolveInternalTurnTranscript({
+                  InputProvenance: inputProvenance,
+                  InternalTurnSource: ctx.InternalTurnSource ?? sessionCtx.InternalTurnSource,
+                }).provenance,
+              }
             : {}),
           ...(transport ? { transport } : {}),
           ...(userTurnMediaForPersistence.length > 0 ? { media: userTurnMediaForPersistence } : {}),
@@ -355,6 +362,7 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
     attachToolAllowlistIntersection(queuedToolsAllow, queuedToolIntersections);
   }
   const admittedSessionSettings = opts?.admittedSessionSettings;
+  const groupTurn = getGroupThreadTurn();
   const followupRun = {
     prompt: queuedBody,
     transcriptPrompt: transcriptCommandBody,
@@ -378,7 +386,10 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
             : { kind: "drop" as const, reason: "source-unavailable" as const },
         }
       : {}),
-    messageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
+    messageId:
+      groupTurn && groupTurn.round > 1
+        ? groupTurn.messageId
+        : (sessionCtx.MessageSidFull ?? sessionCtx.MessageSid),
     summaryLine: baseBodyTrimmedRaw,
     ...(queuedToolsAllow !== undefined ? { toolsAllow: queuedToolsAllow } : {}),
     ...(opts?.disableTools !== undefined ? { disableTools: opts.disableTools } : {}),

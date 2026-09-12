@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   runUpdateRepairLoop: vi.fn(),
   agentExecCommand: vi.fn(),
   resolveExecutablePath: vi.fn(),
+  runUtf8CommandWithTimeout: vi.fn(),
   spawn: vi.fn(),
 }));
 
@@ -59,6 +60,11 @@ vi.mock("./doctor-lint.js", () => ({
 vi.mock("../infra/executable-path.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../infra/executable-path.js")>()),
   resolveExecutablePath: mocks.resolveExecutablePath,
+}));
+
+vi.mock("../process/exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../process/exec.js")>()),
+  runUtf8CommandWithTimeout: mocks.runUtf8CommandWithTimeout,
 }));
 
 vi.mock("../cli/gateway-rpc.js", () => ({
@@ -100,6 +106,14 @@ describe("triageCommand", () => {
       finalValidation: { ok: true, score: 0, summary: "Doctor lint reports no errors." },
     });
     mocks.resolveExecutablePath.mockReturnValue(undefined);
+    mocks.runUtf8CommandWithTimeout.mockImplementation(async (argv, options) => {
+      if (argv.at(-1) === "--help") {
+        return { stdout: "--safe-mode", stderr: "", code: 0, termination: "exit" };
+      }
+      const actual =
+        await vi.importActual<typeof import("../process/exec.js")>("../process/exec.js");
+      return await actual.runUtf8CommandWithTimeout(argv, options);
+    });
     mocks.spawn.mockImplementation(() => {
       const child = new EventEmitter();
       queueMicrotask(() => child.emit("exit", 0, null));
@@ -136,9 +150,11 @@ describe("triageCommand", () => {
       expect(mocks.agentExecCommand).not.toHaveBeenCalled();
       expect(runtime.exit).not.toHaveBeenCalled();
       const output = runtime.log.mock.calls.flat().join("\n");
-      expect(output).toContain("Ready-to-run agent handoffs:");
-      expect(output).toContain("claude -p");
-      expect(output).toContain("openclaw triage");
+      expect(output).toContain("No repair agent was started.");
+      expect(output).toContain(run ? "openclaw triage --run" : "claude -p");
+      expect(runtime.log.mock.calls.filter(([line]) => String(line).startsWith("  "))).toHaveLength(
+        1,
+      );
       const artifacts = await fs.readdir(path.join(stateDir, "logs/support"));
       const promptFile = artifacts.find((file) => file.endsWith(".md"));
       expect(await fs.readFile(path.join(stateDir, "logs/support", promptFile!), "utf8")).toContain(
@@ -168,7 +184,7 @@ describe("triageCommand", () => {
     expect(mocks.confirm).toHaveBeenCalledOnce();
     expect(mocks.spawn).not.toHaveBeenCalled();
     expect(mocks.runUpdateRepairLoop).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith("Ready-to-run agent handoffs:");
+    expect(log).toHaveBeenCalledWith("No repair agent was started.");
   });
 
   it.each([
@@ -376,8 +392,8 @@ describe("triageCommand", () => {
       expect(output).toContain(
         configured ? "Authentication required" : "No configured embedded agent",
       );
-      expect(output).toContain("openclaw triage --run");
-      expect(output).toContain("codex exec --skip-git-repo-check - <");
+      expect(output).toContain(configured ? "openclaw triage --run" : "openclaw triage");
+      expect(output).not.toContain("codex exec --skip-git-repo-check - <");
       const promptFile = (await fs.readdir(path.join(stateDir, "logs/support"))).find((file) =>
         file.endsWith(".md"),
       );
@@ -679,8 +695,8 @@ describe("triageCommand", () => {
     expect(prompt).not.toContain(stateDir);
   });
 
-  it.each(["json", "nonInteractive"] as const)(
-    "preserves a failed update when Doctor and export fail in %s mode on a terminal",
+  it.each(["json", "nonInteractive", "piped"] as const)(
+    "preserves a failed update when Doctor and export fail in %s mode",
     async (mode) => {
       const secret = "sk-test-update-triage-secret-1234567890";
       mocks.collectDoctorFindings.mockRejectedValue(
@@ -696,9 +712,9 @@ describe("triageCommand", () => {
         JSON.stringify({ error: `Original update failed at ${stateDir}; token=${secret}` }),
       );
 
-      await withTriageTerminal(true, async () => {
+      await withTriageTerminal(mode !== "piped", async () => {
         await triageCommand(runtime, {
-          [mode]: true,
+          ...(mode === "piped" ? {} : { [mode]: true }),
           updateResult,
         });
       });
@@ -926,7 +942,7 @@ describe("triageCommand", () => {
       expect(prompt).toContain('Repair A&B at 100%: ! "quoted"');
       expect(prompt).toContain("\n");
       expect(command).toBe(nodeSource === "current" ? currentNode : pathNode);
-      expect(argv).toEqual([entrypoint, prompt]);
+      expect(argv).toEqual([entrypoint, "--safe-mode", prompt]);
       expect(options?.stdio).toBe("inherit");
       expect(options?.shell).not.toBe(true);
       expect(options?.windowsHide).not.toBe(true);
@@ -955,17 +971,13 @@ describe("triageCommand", () => {
       const commands = runtime.log.mock.calls
         .map(([line]) => String(line))
         .filter((line) => line.startsWith("  "));
-      expect(commands).toHaveLength(5);
-      for (const command of commands) {
-        expect(command).not.toMatch(/^ {2}env /u);
-        expect(command).toContain(`'${configPath.replaceAll("'", "''")}'`);
-      }
-      expect(commands[0]).toContain("| & claude -p");
-      expect(commands[1]).toContain("| & codex exec --skip-git-repo-check -");
-      expect(commands[1]).toContain("Get-Content -Raw -Encoding UTF8 -LiteralPath ");
-      expect(commands[2]).toContain("| & opencode run");
-      expect(commands[3]).toContain("| & pi --print");
-      expect(commands[4]).toContain("& openclaw triage --run");
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).not.toMatch(/^ {2}env /u);
+      expect(commands[0]).toContain(`'${configPath.replaceAll("'", "''")}'`);
+      expect(commands[0]).toContain(
+        agent === "claude" ? "| & claude -p" : "| & codex exec --skip-git-repo-check -",
+      );
+      expect(commands[0]).toContain("Get-Content -Raw -Encoding UTF8 -LiteralPath ");
       expect(mocks.spawn).not.toHaveBeenCalled();
     },
   );
@@ -998,7 +1010,7 @@ describe("triageCommand", () => {
     const promptPath = String(runtime.log.mock.calls[0]?.[0]).replace("Debugging prompt: ", "");
     expect(mocks.spawn).toHaveBeenCalledExactlyOnceWith(
       `/usr/local/bin/${agent}`,
-      [await fs.readFile(promptPath, "utf8")],
+      [...(agent === "claude" ? ["--safe-mode"] : []), await fs.readFile(promptPath, "utf8")],
       {
         stdio: "inherit",
         env: {

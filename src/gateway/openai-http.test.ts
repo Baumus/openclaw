@@ -2614,7 +2614,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         { itemId: "answer-1", text: "Echo", delta: "Echo" },
         { itemId: "answer-2", text: "Echo", delta: "Echo" },
       ],
-      expected: "EchoEcho",
+      expected: "Echo\n\nEcho",
       resultTexts: ["Echo", "Echo"],
     },
     {
@@ -2626,7 +2626,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         { itemId: "answer-2", text: "Echo", delta: "Echo" },
         { itemId: "answer-2", text: "Echo!", delta: "!" },
       ],
-      expected: "EchoEcho!",
+      expected: "Echo\n\nEcho!",
     },
     {
       name: "repeated delta-only text within an assistant item",
@@ -2637,12 +2637,34 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
       expected: "EchoEcho",
     },
     {
+      name: "split leading newlines followed by the matching item snapshot",
+      events: [
+        { itemId: "answer-1", text: "First." },
+        { itemId: "answer-2", delta: "\n" },
+        { itemId: "answer-2", delta: "\n" },
+        { itemId: "answer-2", delta: "Se" },
+        { itemId: "answer-2", delta: "cond." },
+        { itemId: "answer-2", text: "\n\nSecond." },
+      ],
+      expected: "First.\n\nSecond.",
+    },
+    {
+      name: "an empty new item followed by deltas and a matching snapshot",
+      events: [
+        { itemId: "answer-1", text: "First." },
+        { itemId: "answer-2", delta: "" },
+        { itemId: "answer-2", delta: "Second." },
+        { itemId: "answer-2", text: "Second." },
+      ],
+      expected: "First.\n\nSecond.",
+    },
+    {
       name: "text beyond the live display cap",
       events: [
         { itemId: "answer-1", text: "x".repeat(500_001), delta: "x".repeat(500_001) },
         { itemId: "answer-2", text: "tail", delta: "tail" },
       ],
-      expected: `${"x".repeat(500_001)}tail`,
+      expected: `${"x".repeat(500_001)}\n\ntail`,
     },
   ])(
     "preserves $name in official SDK assistant streams",
@@ -2844,6 +2866,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
   it.each([
     { name: "rewritten", replacementText: "final answer" },
     { name: "shortened", replacementText: "dra" },
+    { name: "rewritten then extended by a delta", replacementText: "other answer", tailDelta: "!" },
     { name: "cleared", replacementText: "" },
     {
       name: "replaced by a held provisional item",
@@ -2893,6 +2916,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
       resultText,
       noResultText,
       terminalEcho,
+      tailDelta,
     }) => {
       agentCommandMock.mockClear();
       agentCommandMock.mockImplementationOnce((async (opts: unknown) => {
@@ -2928,6 +2952,9 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         }
         if (terminalEcho) {
           emitAgentEvent({ runId, stream: "assistant", data: { text: replacementText } });
+        }
+        if (tailDelta) {
+          emitAgentEvent({ runId, stream: "assistant", data: { delta: tailDelta } });
         }
         emitAgentEvent({ runId, stream: "lifecycle", data: { phase: "end" } });
         return {

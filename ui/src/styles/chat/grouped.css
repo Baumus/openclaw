@@ -653,13 +653,13 @@ img.chat-avatar.user {
   object-fit: cover;
 }
 
-/* Keep the image and initials fallback in one stable grid item. display: contents
+/* Keep the image and its fallback in one stable grid item. display: contents
    can lose the avatar column when Lit reconciles an attributed message. */
 .chat-avatar-slot {
   display: grid;
 }
 
-.chat-avatar-slot > .chat-avatar--sender-initials {
+.chat-avatar-slot > :not(img) {
   display: none;
 }
 
@@ -667,7 +667,7 @@ img.chat-avatar.user {
   display: none;
 }
 
-.chat-avatar-slot.is-fallback > .chat-avatar--sender-initials {
+.chat-avatar-slot.is-fallback > :not(img) {
   display: grid;
 }
 
@@ -693,11 +693,6 @@ img.chat-avatar {
   object-position: center;
 }
 
-img.chat-avatar.chat-avatar--logo {
-  object-fit: contain;
-  padding: 2px;
-}
-
 /* Minimal Bubble Design - dynamic width based on content */
 .chat-bubble {
   position: relative;
@@ -714,7 +709,7 @@ img.chat-avatar.chat-avatar--logo {
   overflow-wrap: break-word;
 }
 
-.chat-thread .chat-bubble {
+:is(.chat-thread, .chat-session-rail__thread) .chat-bubble {
   letter-spacing: 0; /* Custodian shares .chat-bubble but keeps the application-wide tracking. */
 }
 
@@ -931,6 +926,7 @@ img.chat-avatar.chat-avatar--logo {
 
 .chat-copy-btn__icon-copy,
 .chat-copy-btn__icon-check {
+  display: flex;
   position: absolute;
   top: 0;
   left: 0;
@@ -957,10 +953,28 @@ img.chat-avatar.chat-avatar--logo {
   color: var(--danger);
 }
 
-.chat-copy-btn[data-copy-state="copied"] {
+.chat-copy-btn[data-copy-state="copied"],
+.chat-group
+  :is(.chat-group-footer-actions, .chat-message-actions-row)
+  button[data-copy-state="copied"] {
+  opacity: 1;
   border-color: var(--ok-subtle);
   background: var(--ok-subtle);
   color: var(--ok);
+}
+
+/* The check is the visible confirmation; retain the live status for assistive
+   technology and the footer's transient-feedback disclosure. */
+.chat-group .chat-copy-btn[data-copy-state="copied"] + [data-copy-feedback] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .chat-copy-btn:focus-visible,
