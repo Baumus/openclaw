@@ -1008,7 +1008,6 @@ extensions/qa-lab/src/providers/mock-openai/mock-openai-input.ts	6
 extensions/qa-lab/src/providers/mock-openai/mock-openai-responses-websocket.ts	2
 extensions/qa-lab/src/providers/mock-openai/server.ts	15
 extensions/qa-lab/src/providers/shared/auth-store.ts	1
-extensions/qa-lab/src/qa-bus-protocol.ts	1
 extensions/qa-lab/src/qa-transport.ts	1
 extensions/qa-lab/src/run-config.ts	2
 extensions/qa-lab/src/runtime-parity.ts	3
@@ -1823,7 +1822,7 @@ src/agents/mcp-app-model-context.ts	1
 src/agents/mcp-auth-profile.ts	2
 src/agents/mcp-codex-tool-approval.ts	4
 src/agents/mcp-http-fetch.ts	3
-src/agents/mcp-json-schema-validator.ts	6
+src/agents/mcp-json-schema-validator.ts	4
 src/agents/mcp-oauth-store.ts	2
 src/agents/mcp-transport-config.ts	5
 src/agents/mcp-transport.ts	2
@@ -2355,7 +2354,7 @@ src/commands/doctor-auth-flat-profiles.ts	3
 src/commands/doctor-auth-migration-receipts.ts	3
 src/commands/doctor-auth-profile-config.ts	4
 src/commands/doctor-config-analysis.ts	3
-src/commands/doctor-config-flow.ts	3
+src/commands/doctor-config-flow.ts	2
 src/commands/doctor-config-preflight.cron.ts	4
 src/commands/doctor-db-bloat.ts	1
 src/commands/doctor-gateway-services.ts	1
