@@ -72,7 +72,6 @@ import { maybeResolveNativeSlashCommandFastReply } from "./get-reply-native-slas
 import {
   applyLinkUnderstandingIfNeeded,
   applyMediaUnderstandingIfNeeded,
-  assertReplyPreprocessingActive,
   hasExplicitAudioUnderstandingConfig,
   hasLinkCandidate,
   resolveReplyAgentScope,
@@ -101,6 +100,7 @@ import {
   recordReplyPreRunRejection,
   resolveReplyOperationRunState,
 } from "./reply-operation-run-state.js";
+import { assertReplyPreprocessingActive } from "./reply-preprocessing-abort.js";
 import { createReplyTimingTracker, isReplyProfilerEnabled } from "./reply-timing-tracker.js";
 import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import { prepareReplySessionDiffBaseline } from "./session-diff-baseline.js";

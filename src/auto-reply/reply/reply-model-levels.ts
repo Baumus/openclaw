@@ -4,8 +4,8 @@ import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import { createLazyPromise } from "../../shared/lazy-promise.js";
 import { normalizeThinkLevel, type ReasoningLevel, type ThinkLevel } from "../thinking.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
-import { assertReplyPreprocessingActive } from "./get-reply-preprocessing.js";
 import type { createModelSelectionState } from "./model-selection.js";
+import { assertReplyPreprocessingActive } from "./reply-preprocessing-abort.js";
 
 type ReplyModelLevelSelection = {
   provider: string;
