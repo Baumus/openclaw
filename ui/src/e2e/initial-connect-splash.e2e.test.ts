@@ -310,6 +310,14 @@ describeControlUiE2e("Control UI initial connect splash E2E", () => {
 
       for (const size of [viewport, { width: 1440, height: 1440 }, { width: 390, height: 844 }]) {
         await page.setViewportSize(size);
+        // The shell viewport owner publishes its height on the next animation frame.
+        await expect
+          .poll(() =>
+            page.evaluate(() =>
+              document.documentElement.style.getPropertyValue("--shell-viewport-height"),
+            ),
+          )
+          .toBe(`${size.height}px`);
         const content = await page.locator(".content--chat").boundingBox();
         const header = await skeleton.locator(".loading-skeleton__header").boundingBox();
         const composer = await skeleton.locator(".loading-skeleton__composer").boundingBox();
