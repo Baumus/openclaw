@@ -554,6 +554,7 @@ export async function resolveReplyDirectives(params: {
       defaultActivation,
       resolveModelLevels: createReplyModelLevelResolver({
         modelState,
+        abortSignal: opts?.abortSignal,
         selection: {
           provider,
           model,
