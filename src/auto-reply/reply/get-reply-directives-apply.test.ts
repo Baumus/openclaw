@@ -82,7 +82,9 @@ describe("applyInlineDirectiveOverrides", () => {
         expect(
           await Promise.race([
             outcome,
-            new Promise<string>((resolve) => setImmediate(() => resolve("pending"))),
+            new Promise<string>((resolve) => {
+              setImmediate(() => resolve("pending"));
+            }),
           ]),
         ).toBe("AbortError");
         expect(mocks.handleDirective).not.toHaveBeenCalled();
