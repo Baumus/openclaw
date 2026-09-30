@@ -448,6 +448,7 @@ export async function resolveReplyDirectives(params: {
   const inlineStatusRequested = hasInlineStatus && canInterpretMessageDirectives;
 
   const applyResult = await applyInlineDirectiveOverrides({
+    abortSignal: opts?.abortSignal,
     ctx,
     cfg,
     agentId,
