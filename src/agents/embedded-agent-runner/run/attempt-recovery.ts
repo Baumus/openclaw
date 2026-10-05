@@ -461,6 +461,7 @@ export async function recoverEmbeddedRunAttempt(input: {
     sessionPromptState.markOwnedTranscriptRetry();
     sessionPromptState.continueFromCurrentTranscript({
       includeToolFailureInstruction: Boolean(attempt.lastToolError),
+      includeCurrentUserRequest: true,
     });
     recordRecoveryDecision("accepted", "transient_retry");
     return retry({

@@ -273,7 +273,10 @@ export async function createEmbeddedRunSessionPromptState(input: {
         await waitForSessionTranscriptProjection({ ...target, sessionId }, abortSignal);
       }
     },
-    continueFromCurrentTranscript: (options?: { includeToolFailureInstruction?: boolean }) => {
+    continueFromCurrentTranscript: (options?: {
+      includeToolFailureInstruction?: boolean;
+      includeCurrentUserRequest?: boolean;
+    }) => {
       // Raw model runs load no transcript history; the original prompt is their only task context.
       if (params.modelRun === true || params.promptMode === "none") {
         return;
@@ -281,7 +284,14 @@ export async function createEmbeddedRunSessionPromptState(input: {
       const prompt = options?.includeToolFailureInstruction
         ? `${CONTINUATION_PROMPT} ${TOOL_FAILURE_INSTRUCTION}`
         : CONTINUATION_PROMPT;
-      activateInternalPrompt(prompt);
+      if (options?.includeCurrentUserRequest && !params.prompt.trim()) {
+        throw new Error("Cannot retry without the current user request");
+      }
+      activateInternalPrompt(
+        options?.includeCurrentUserRequest
+          ? `Current user request:\n${params.prompt}\n\n${prompt}`
+          : prompt,
+      );
     },
     onUserMessagePersisted,
     waitForCurrentUserMessagePersistence,

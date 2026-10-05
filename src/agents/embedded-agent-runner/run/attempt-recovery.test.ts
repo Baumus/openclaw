@@ -546,6 +546,14 @@ describe("recoverEmbeddedRunAttempt", () => {
   });
 
   it.each<[string, TransportDropScenario]>([
+    ["overload before output", { noTools: true, errorMessage: "Selected model is at capacity" }],
+    [
+      "overload after progress and settled tools",
+      {
+        errorMessage: "Selected model is at capacity",
+        assistantTexts: ["I am checking the current request."],
+      },
+    ],
     ["WebSocket drop", {}],
     [
       "WebSocket transport code",
@@ -628,6 +636,7 @@ describe("recoverEmbeddedRunAttempt", () => {
     expect(markOwnedTranscriptRetry).toHaveBeenCalledOnce();
     expect(continueFromCurrentTranscript).toHaveBeenCalledExactlyOnceWith({
       includeToolFailureInstruction: Boolean(scenario.lastToolError),
+      includeCurrentUserRequest: true,
     });
     expect(failoverRetryController.advanceAuthProfile).not.toHaveBeenCalled();
     expect(failoverRetryController.maybeMarkAuthProfileFailure).not.toHaveBeenCalled();

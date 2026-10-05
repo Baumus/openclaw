@@ -279,6 +279,27 @@ describe("embedded run session prompt state", () => {
     });
   });
 
+  it("keeps the admitted request visible in a same-model transient retry", async () => {
+    await using state = await createState({ prompt: "Complete Task B" });
+
+    state.continueFromCurrentTranscript({ includeCurrentUserRequest: true });
+
+    expect(state.activePrompt).toEqual({
+      override: `Current user request:\nComplete Task B\n\n${CONTINUE_FROM_TRANSCRIPT_PROMPT}`,
+      persisted: true,
+      internal: true,
+    });
+    expect(state.suppressNextUserMessagePersistence).toBe(true);
+  });
+
+  it("fails visibly when a transient retry has no current request", async () => {
+    await using state = await createState({ prompt: "" });
+
+    expect(() => state.continueFromCurrentTranscript({ includeCurrentUserRequest: true })).toThrow(
+      "Cannot retry without the current user request",
+    );
+  });
+
   it.each([{ modelRun: true }, { promptMode: "none" as const }])(
     "keeps the original prompt for a raw model run retry (%o)",
     async (rawRun) => {
