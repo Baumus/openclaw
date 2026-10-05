@@ -211,6 +211,7 @@ describe("recoverEmbeddedRunAttempt", () => {
       expect(markOwnedTranscriptRetry).toHaveBeenCalledTimes(2);
       expect(continueFromCurrentTranscript).toHaveBeenCalledExactlyOnceWith({
         includeToolFailureInstruction: false,
+        includeCurrentUserRequest: true,
       });
       expect(failoverRetryController.transientRetryCount).toBe(1);
       expect(failoverRetryController.advanceAuthProfile).not.toHaveBeenCalled();
