@@ -13,6 +13,7 @@ import {
   runCapabilityWithParentAgent,
   runModelAuthWithAgent,
 } from "./capability-cli.test-harness.js";
+import { registerVideoParametersTests } from "./capability-cli.video-parameters.test-support.js";
 
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yf7kAAAAASUVORK5CYII=";
@@ -1526,47 +1527,12 @@ describe("capability cli", () => {
     expect(runtimeErrorMessages().join("\n")).not.toContain("/private-video.mp4");
   });
 
-  it("passes video generation parameters through to runtime", async () => {
-    mocks.generateVideo.mockResolvedValue({
-      provider: "minimax",
-      model: "MiniMax-Hailuo-2.3",
-      attempts: [],
-      videos: [
-        {
-          buffer: Buffer.from("video-bytes"),
-          mimeType: "video/mp4",
-          fileName: "provider-name.mp4",
-        },
-      ],
-    });
-
-    await generateVideo(
-      "--model",
-      "minimax/MiniMax-Hailuo-2.3",
-      "--size",
-      "1280x768",
-      "--aspect-ratio",
-      "16:9",
-      "--resolution",
-      "768p",
-      "--duration",
-      "2.5",
-      "--audio",
-      "--watermark",
-      "--timeout-ms",
-      "300000",
-    );
-
-    const videoCall = firstVideoGenerationCall();
-    expect(videoCall?.prompt).toBe("friendly lobster");
-    expect(videoCall?.modelOverride).toBe("minimax/MiniMax-Hailuo-2.3");
-    expect(videoCall?.size).toBe("1280x768");
-    expect(videoCall?.aspectRatio).toBe("16:9");
-    expect(videoCall?.resolution).toBe("768P");
-    expect(videoCall?.durationSeconds).toBe(2.5);
-    expect(videoCall?.audio).toBe(true);
-    expect(videoCall?.watermark).toBe(true);
-    expect(videoCall?.timeoutMs).toBe(300000);
+  registerVideoParametersTests({
+    mocks,
+    outputFixture,
+    expectOutputFile,
+    firstVideoGenerationCall,
+    firstJsonOutput,
   });
 
   it("fails video generate when a provider returns an undeliverable asset", async () => {
