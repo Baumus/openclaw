@@ -107,6 +107,34 @@ description: *missing
 });
 
 describe("resolveSkillManifestMetadata skill keys", () => {
+  it.each(["", " # display metadata", " #"])(
+    "resolves inline YAML metadata before %j through the skill manifest consumer",
+    (comment) => {
+      const frontmatter = parseSkillFrontmatter(`---
+name: inline-json
+metadata: {"openclaw": {"emoji": "tag#data", "requires": {"bins": ["tool"]}}}${comment}
+---`);
+
+      expect(resolveSkillManifestMetadata(frontmatter)).toEqual({
+        emoji: "tag#data",
+        requires: { bins: ["tool"], anyBins: [], env: [], config: [] },
+      });
+    },
+  );
+
+  it("resolves multiline YAML flow metadata through the skill manifest consumer", () => {
+    const frontmatter = parseSkillFrontmatter(`---
+name: wrapped-flow
+metadata: {openclaw: {emoji: "tag#data",
+  requires: {bins: [tool]}}} # display metadata
+---`);
+
+    expect(resolveSkillManifestMetadata(frontmatter)).toEqual({
+      emoji: "tag#data",
+      requires: { bins: ["tool"], anyBins: [], env: [], config: [] },
+    });
+  });
+
   it("ignores empty optional keys without changing existing nonempty config keys", () => {
     for (const [value, expected] of [
       ["", undefined],
