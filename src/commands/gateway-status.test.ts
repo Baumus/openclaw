@@ -8,6 +8,7 @@ import type { inspectGatewayTlsCertificate as InspectGatewayTlsCertificate } fro
 import type { RuntimeEnv } from "../runtime.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { gatewayStatusCommand } from "./gateway-status.js";
+import { registerSshRouteTests } from "./gateway-status.ssh-route.test-support.js";
 import {
   createUnreachableGatewayProbe,
   createSecretRefGatewayConfig,
@@ -1115,27 +1116,16 @@ describe("gateway-status command", () => {
     });
   });
 
-  it("infers SSH target from gateway.remote.url and ssh config", async () => {
-    const { runtime } = createRuntimeCapture();
-    await withEnvAsync({ USER: "steipete" }, async () => {
-      readBestEffortConfig.mockResolvedValueOnce(
-        makeRemoteGatewayConfig("ws://peters-mac-studio-1.sheep-coho.ts.net:18789"),
-      );
-      resolveSshConfig.mockResolvedValueOnce({
-        user: "steipete",
-        host: "peters-mac-studio-1.sheep-coho.ts.net",
-        port: 2222,
-        identityFiles: ["/tmp/id_ed25519"],
-      });
-
-      startSshPortForward.mockClear();
-      await runGatewayStatus(runtime, { timeout: "1000", json: true });
-
-      expect(startSshPortForward).toHaveBeenCalledTimes(1);
-      const call = requireSshForwardCall();
-      expect(call.target).toBe("steipete@peters-mac-studio-1.sheep-coho.ts.net:2222");
-      expect(call.identity).toBe("/tmp/id_ed25519");
-    });
+  registerSshRouteTests({
+    createRuntimeCapture,
+    readBestEffortConfig,
+    resolveSshConfig,
+    startSshPortForward,
+    sshStop,
+    makeRemoteGatewayConfig,
+    runGatewayStatus,
+    requireSshForwardCall,
+    readProbeCalls,
   });
 
   it("falls back to host-only when USER is missing and ssh config is unavailable", async () => {

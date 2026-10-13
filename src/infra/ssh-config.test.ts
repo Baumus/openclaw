@@ -1,5 +1,6 @@
 // Tests SSH config parsing and canonical command execution.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveSshTarget } from "../commands/gateway-status/discovery.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { resolveSshClient } from "./ssh-client.js";
 import { resolveSshConfig } from "./ssh-config.js";
@@ -43,6 +44,41 @@ describe("ssh-config", () => {
     runCommandMock.mockResolvedValue(commandResult());
     resolveSshClientMock.mockReset();
     resolveSshClientMock.mockReturnValue("/usr/bin/ssh");
+  });
+
+  it.each([
+    { rawTarget: "alias:22", port: 22, explicit: true },
+    { rawTarget: "alias", port: 2222, explicit: false },
+    { rawTarget: "alias:2022", port: 2022, explicit: true },
+  ])("preserves probe port intent for $rawTarget", async ({ rawTarget, port, explicit }) => {
+    runCommandMock.mockImplementationOnce(async (argv) => {
+      const portIndex = argv.indexOf("-p");
+      const selectedPort = portIndex >= 0 ? Number(argv[portIndex + 1]) : 2222;
+      return commandResult({
+        stdout: `user me\nhostname resolved.example\nport ${selectedPort}\n`,
+      });
+    });
+    const resolved = await resolveSshTarget({ rawTarget, identity: null, overallTimeoutMs: 1000 });
+    expect(runCommandMock.mock.calls[0]?.[0]).toEqual([
+      "/usr/bin/ssh",
+      "-G",
+      ...(explicit ? ["-p", String(port)] : []),
+      "--",
+      "alias",
+    ]);
+    expect(resolved?.target).toBe(`me@resolved.example:${port}`);
+  });
+
+  it("preserves resolved default port instead of reapplying destination alias config", async () => {
+    runCommandMock.mockResolvedValueOnce(
+      commandResult({ stdout: "user me\nhostname resolved.example\nport 22\n" }),
+    );
+    const resolved = await resolveSshTarget({
+      rawTarget: "alias",
+      identity: null,
+      overallTimeoutMs: 1000,
+    });
+    expect(resolved?.target).toBe("me@resolved.example:22");
   });
 
   it.each(["not-a-number", "2222abc", "70000"])(
