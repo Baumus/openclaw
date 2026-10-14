@@ -69,6 +69,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
   const { context } = prompt;
   const { runtime, attemptTools } = context;
   const { connection, hookChannelId } = runtime;
+  const { bindingStore, bindingIdentity } = connection;
   const {
     appServer,
     params,
@@ -99,22 +100,13 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
   // Cancellation still owes cleanup. Keep host/lineage authority until this
   // resource owner closes, without inheriting the foreground abort signal.
   const cleanupAuthority = connection.authority.withLiveness(() => {
-    if (nativeProcessAuthority?.hasSourceAuthority) {
-      nativeProcessAuthority.assertCurrent();
-    } else {
-      params.hostCapabilities.assertActive();
-    }
+    CodexNativeProcessAuthority.assertCleanup(nativeProcessAuthority, params.hostCapabilities);
     if (nativeProcessAuthorityReleased) {
       throw new Error("Codex attempt cleanup authority has ended");
     }
   });
   const clearThreadBinding = () =>
-    clearCodexBindingForClient(
-      connection.bindingStore,
-      connection.bindingIdentity,
-      state.thread,
-      cleanupAuthority,
-    );
+    clearCodexBindingForClient(bindingStore, bindingIdentity, state.thread, cleanupAuthority);
   const releaseNativeProcessAuthority = () => {
     if (!nativeProcessAuthorityReleased) {
       nativeProcessAuthorityReleased = true;
@@ -274,7 +266,6 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
           : {}),
         binding: thread,
       });
-      const { bindingStore, bindingIdentity } = connection;
       const assertParentSessionCurrent = async () => {
         await parent?.assertCurrent();
       };
@@ -415,7 +406,6 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     if (afterConfirmedStop && unsettled && !hasNativeRetentionAuthority()) {
       return false;
     }
-    const { bindingStore, bindingIdentity } = connection;
     // Expired settlement cannot start optional retention or queue a row read.
     if (state.nativeSettlementExpired) {
       return false;
@@ -424,8 +414,10 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
       if (state.nativeSettlementExpired) {
         return false;
       }
+      let publicationStarted = false;
       let pending: Promise<boolean> | undefined;
       const publish = () => {
+        publicationStarted = true;
         if (
           state.nativeSettlementExpired ||
           thread.clientId !== resolveCodexAppServerClientInstanceId(client) ||
@@ -460,6 +452,11 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
         await (hasNativeRetentionAuthority()
           ? cleanupAuthority.withCurrent(publish)
           : connection.withCurrent(publish));
+      } catch (error) {
+        if (publicationStarted || !hasNativeRetentionAuthority()) {
+          throw error;
+        }
+        await cleanupAuthority.withCurrent(publish);
       } finally {
         // A reader-release failure after publication still owes its retention join.
         await pending;

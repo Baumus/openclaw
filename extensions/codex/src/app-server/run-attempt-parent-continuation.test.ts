@@ -1,7 +1,6 @@
 import path from "node:path";
 import { invokeNativeHookRelay } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { createAgentHarnessHostCapabilitiesForTest } from "openclaw/plugin-sdk/plugin-test-runtime";
-import { captureRuntimeConfigAsyncReader } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { describe, expect, it, vi } from "vitest";
 import { readAttemptTerminal } from "./attempt-terminal.test-helper.js";
 import {
@@ -204,12 +203,11 @@ describe("Codex parent continuation with native child custody", () => {
   it.each([false, true])(
     "settles a yielded parent under retained source authority (revoked: %s)",
     async (revoked) => {
-      // The real yield tool enters the core requester registry. Prepare its
-      // runtime config before native turn acceptance starts the execution budget.
-      await captureRuntimeConfigAsyncReader()();
       const sessionFile = path.join(tempDir, "yielded-parent.jsonl");
       const workspaceDir = path.join(tempDir, "workspace");
       const params = createParams(sessionFile, workspaceDir);
+      // Full host tool construction can exceed the lightweight fixture's 5s budget.
+      params.timeoutMs = 30_000;
       params.runtimePlan = createCodexRuntimePlanFixture();
       setCodexTestModelSupportsTools(params, true);
       let sourceRevoked = false;
