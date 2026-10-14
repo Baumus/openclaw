@@ -1,4 +1,5 @@
 import { AsyncLocalStorage, createHook } from "node:async_hooks";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { queryObjects } from "node:v8";
 import { describe, expect, it, vi } from "vitest";
 import { trackAsyncWork } from "../shared/async-work-scope.js";
@@ -18,6 +19,21 @@ function fixture() {
   const time = createGatewaySchedulerClock(1_000);
   const scheduler = createTestGatewayScheduler(time.clock);
   return { time, scheduler };
+}
+
+function withNativeErrorStacks<T>(run: () => T): T {
+  const prepareStackTrace = Object.getOwnPropertyDescriptor(Error, "prepareStackTrace");
+  try {
+    // Vite's formatter closures can retain native callsites beyond the closing call.
+    Reflect.deleteProperty(Error, "prepareStackTrace");
+    return run();
+  } finally {
+    if (prepareStackTrace) {
+      Object.defineProperty(Error, "prepareStackTrace", prepareStackTrace);
+    } else {
+      Reflect.deleteProperty(Error, "prepareStackTrace");
+    }
+  }
 }
 
 describe("Gateway timed work", () => {
@@ -82,9 +98,52 @@ describe("Gateway timed work", () => {
     await scheduler.stop();
   });
 
+  it("runs a maintenance slot once when the wall clock drifts ahead of elapsed time", async () => {
+    const { time, scheduler } = fixture();
+    const run = vi.fn();
+    scheduler.schedule({
+      id: "maintenance",
+      delayMs: 30_000,
+      everyMs: 30_000,
+      phase: "maintenance",
+      run,
+    });
+    time.setTime(2_001);
+    // Any later schedule re-arms the host timer on the earlier wall-clock slot.
+    scheduler.schedule({ id: "later", delayMs: 600_000, run: () => {} });
+    await time.advanceBy(27_999);
+    expect(run).toHaveBeenCalledOnce();
+    await time.advanceBy(1_001);
+    expect(run).toHaveBeenCalledOnce();
+    await time.advanceBy(28_999);
+    expect(run).toHaveBeenCalledTimes(2);
+    await scheduler.stop();
+  });
+
+  it("keeps maintenance cadence after a forward wall-clock jump is corrected", async () => {
+    const { time, scheduler } = fixture();
+    const run = vi.fn();
+    scheduler.schedule({
+      id: "maintenance",
+      delayMs: 30_000,
+      everyMs: 30_000,
+      phase: "maintenance",
+      run,
+    });
+    time.setTime(301_000);
+    await time.wake();
+    expect(run).toHaveBeenCalledOnce();
+    time.setTime(30_000);
+    await time.advanceBy(29_999);
+    expect(run).toHaveBeenCalledOnce();
+    await time.advanceBy(1);
+    expect(run).toHaveBeenCalledTimes(2);
+    await scheduler.stop();
+  });
+
   it.each(["root", "scope"] as const)(
     "releases the retiring caller while its %s abort signal remains reachable",
-    (kind) => {
+    async (kind) => {
       class RetiredOwner {
         close() {
           const { scheduler } = fixture();
@@ -93,7 +152,11 @@ describe("Gateway timed work", () => {
           return owner.signal;
         }
       }
-      const signals = Array.from({ length: 12 }, () => new RetiredOwner().close());
+      const signals = withNativeErrorStacks(() =>
+        Array.from({ length: 12 }, () => new RetiredOwner().close()),
+      );
+      // Collect after the closing call's execution frame has unwound.
+      await nextTurn();
       expect(queryObjects(RetiredOwner)).toBe(0);
       for (const signal of signals) {
         expect(signal.aborted).toBe(true);
@@ -101,6 +164,29 @@ describe("Gateway timed work", () => {
       }
     },
   );
+
+  it("releases a scope's closing caller after its parent already aborted", async () => {
+    class RetiredCaller {
+      close(scope: ReturnType<GatewayScheduler["scope"]>) {
+        scope.beginClose();
+      }
+    }
+    const scopes = withNativeErrorStacks(() =>
+      Array.from({ length: 12 }, () => {
+        const { scheduler } = fixture();
+        const scope = scheduler.scope();
+        scheduler.beginClose();
+        new RetiredCaller().close(scope);
+        return scope;
+      }),
+    );
+    await nextTurn();
+    expect(queryObjects(RetiredCaller)).toBe(0);
+    for (const scope of scopes) {
+      expect(scope.signal.aborted).toBe(true);
+      expect(scope.signal.reason).toMatchObject({ name: "AbortError" });
+    }
+  });
 
   it("does not wake or allocate async resources before a fractional deadline", async () => {
     const time = createGatewaySchedulerClock(1_000);
