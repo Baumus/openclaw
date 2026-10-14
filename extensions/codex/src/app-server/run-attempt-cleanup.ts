@@ -114,16 +114,18 @@ export async function cleanupCodexAttempt(
     // Incognito retains its creation policy without idle eviction.
     // Ordinary failed turns keep loaded configuration too: native unsubscribe delays unload.
     // Retain that configuration owner so later input can reuse the same thread.
+    const retainCancelledNativeThread =
+      terminalState.settledTurnStatus === undefined && state.nativeCancellationConfirmed;
     const retainedOrdinaryThread =
       !pluginRuntimeRefreshing &&
       ((retainLiveIncognitoThread &&
         resourceState.thread.liveThreadEphemeralPolicy !== undefined) ||
-        (terminalState.settledTurnStatus !== undefined &&
+        ((terminalState.settledTurnStatus !== undefined || retainCancelledNativeThread) &&
           !isIncognitoSessionKey(params.sessionKey) &&
           params.cleanupBundleMcpOnRunEnd !== true &&
           resourceState.thread.liveThreadConfigFingerprint !== undefined &&
           !resourceState.thread.ringZeroConfigFingerprint)) &&
-      (await retainThreadSubscription());
+      (await retainThreadSubscription(state.nativeCancellationConfirmed));
     // Nonordinary incognito lifetimes retain their previous live-only ownership.
     const retainLiveThread =
       retainedOrdinaryThread ||

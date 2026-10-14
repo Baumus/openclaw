@@ -293,10 +293,13 @@ describe("Codex terminal dynamic-tool release", () => {
       const nativeCleanup = interrupt.mock.results[0]?.value;
       const settled = vi.fn();
       void nativeCleanup?.then(settled, settled);
+      const subscriptionCleanupSettled = vi.fn();
+      void runtime.state.abortCleanup.then(subscriptionCleanupSettled);
 
       route.release();
       await yieldImmediate();
       expect(settled).not.toHaveBeenCalled();
+      expect(subscriptionCleanupSettled).not.toHaveBeenCalled();
       expect(physical.stdinDestroyed).toBe(false);
       expect(peerRoute.signal.aborted).toBe(false);
       physical.send({
@@ -316,6 +319,9 @@ describe("Codex terminal dynamic-tool release", () => {
         },
       });
       await expect(nativeCleanup).resolves.toBe(true);
+      await runtime.state.abortCleanup;
+      expect(subscriptionCleanupSettled).toHaveBeenCalledOnce();
+      expect(runtime.state.nativeCancellationConfirmed).toBe(true);
       expect(physical.stdinDestroyed).toBe(false);
       expect(peerRoute.signal.aborted).toBe(false);
     } finally {

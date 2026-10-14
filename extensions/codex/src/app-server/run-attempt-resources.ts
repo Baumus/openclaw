@@ -11,7 +11,10 @@ import {
   unsubscribeCodexThreadBestEffort,
 } from "./attempt-client-cleanup.js";
 import { resolveCodexStartupTimeoutMs } from "./attempt-timeouts.js";
-import { protectCodexAppServerLiveThread } from "./client-runtime.js";
+import {
+  isCodexAppServerLiveThreadProtected,
+  protectCodexAppServerLiveThread,
+} from "./client-runtime.js";
 import { resolveCodexAppServerClientInstanceId, type CodexAppServerClient } from "./client.js";
 import { shouldAutoApproveCodexAppServerApprovals } from "./config.js";
 import { CodexAppServerEventProjector } from "./event-projector.js";
@@ -97,7 +100,11 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
   // Cancellation still owes cleanup. Keep host/lineage authority until this
   // resource owner closes, without inheriting the foreground abort signal.
   const cleanupAuthority = createNativeSessionBindingAuthority(connection.authority.lineage, () => {
-    params.hostCapabilities.assertActive();
+    if (nativeProcessAuthority?.hasSourceAuthority) {
+      nativeProcessAuthority.assertCurrent();
+    } else {
+      params.hostCapabilities.assertActive();
+    }
     if (nativeProcessAuthorityReleased) {
       throw new Error("Codex attempt cleanup authority has ended");
     }
@@ -394,12 +401,19 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
   let subscriptionSettlement:
     | { thread: CodexAppServerThreadLifecycleBinding; retained: boolean }
     | undefined;
-  const retainThreadSubscription = async (): Promise<boolean> => {
+  const retainThreadSubscription = async (afterConfirmedStop = false): Promise<boolean> => {
     const { client, thread } = state;
     if (subscriptionSettlement?.thread === thread) {
       return subscriptionSettlement.retained;
     }
     if (!thread || thread.clientId !== resolveCodexAppServerClientInstanceId(client)) {
+      return false;
+    }
+    const hasNativeRetentionAuthority = () =>
+      nativeProcessAuthority?.hasCurrentProcesses(client, thread.threadId) ||
+      (afterConfirmedStop && isCodexAppServerLiveThreadProtected(client, thread.threadId));
+    const unsettled = connection.terminalState.settledTurnStatus === undefined;
+    if (afterConfirmedStop && unsettled && !hasNativeRetentionAuthority()) {
       return false;
     }
     const { bindingStore, bindingIdentity } = connection;
@@ -411,10 +425,8 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
       if (state.nativeSettlementExpired) {
         return false;
       }
-      let publicationStarted = false;
       let pending: Promise<boolean> | undefined;
-      const publish = (rowFailure?: { error: unknown }) => {
-        publicationStarted = true;
+      const publish = () => {
         if (
           state.nativeSettlementExpired ||
           thread.clientId !== resolveCodexAppServerClientInstanceId(client) ||
@@ -424,10 +436,9 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
         }
         // Decide at publication, after lease and any row-admission wait.
         // Concrete native work may outlive the foreground row that created it.
-        if (!nativeProcessAuthority?.hasCurrentProcesses(client, thread.threadId)) {
-          if (rowFailure) {
-            throw rowFailure.error;
-          }
+        if (hasNativeRetentionAuthority()) {
+          cleanupAuthority.assertCurrent();
+        } else {
           params.hostCapabilities.assertActive();
           connection.assertCurrent();
         }
@@ -444,22 +455,17 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
           ephemeralPolicy: thread.liveThreadEphemeralPolicy,
         });
       };
-      if (nativeProcessAuthority?.hasCurrentProcesses(client, thread.threadId)) {
-        publish();
-      } else {
-        try {
-          await connection.withCurrent(() => publish());
-        } catch (error) {
-          // A process admitted during the row wait can still own cleanup.
-          // Never replay an effect if reader release failed after publication.
-          if (publicationStarted) {
-            await pending;
-            throw error;
-          }
-          publish({ error });
-        }
+      try {
+        // Child protection is subscription custody, not session authority. Even
+        // after foreground cancellation, publish only under the original lineage.
+        await (hasNativeRetentionAuthority()
+          ? cleanupAuthority.withCurrent(publish)
+          : connection.withCurrent(publish));
+      } finally {
+        // A reader-release failure after publication still owes its retention join.
+        await pending;
       }
-      return pending ? await pending : false;
+      return pending ?? false;
     });
     if (retained) {
       subscriptionSettlement = { thread, retained: true };

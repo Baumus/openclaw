@@ -309,6 +309,10 @@ export class CodexNativeProcessAuthority {
     }
   }
 
+  get hasSourceAuthority(): boolean {
+    return this.source !== undefined;
+  }
+
   hasCurrentProcesses(client: CodexAppServerClient, threadId: string): boolean {
     this.assertCurrent();
     return [...this.commands].some(
