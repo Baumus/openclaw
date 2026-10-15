@@ -525,14 +525,12 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
         );
       } finally {
         if (!retained) {
+          let bindingReleased = false;
           try {
-            const bindingReleased =
+            bindingReleased =
               !isIncognitoSessionKey(params.sessionKey) || (await clearThreadBinding());
-            if (bindingReleased) {
-              await releaseThreadSubscription();
-            }
           } finally {
-            if (thread.liveThreadOwnership) {
+            if (bindingReleased || thread.liveThreadOwnership) {
               await releaseThreadSubscription();
             }
           }

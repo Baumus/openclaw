@@ -37,6 +37,64 @@ import {
 
 setupRunAttemptTestHooks();
 
+function createParentHarness() {
+  const runtime = createRuntime();
+  const register = codexNativeSubagentMonitorRuntime.register;
+  vi.spyOn(codexNativeSubagentMonitorRuntime, "register").mockImplementation((request) =>
+    register({ ...request, runtime }),
+  );
+  let turns = 0;
+  const harness = createStartedThreadHarness(async (method, request) => {
+    if (method === "thread/resume") {
+      return threadStartResult("thread-1");
+    }
+    if (method === "thread/read") {
+      return threadRead({
+        childThreadId: (request as { threadId: string }).threadId,
+        parentThreadId: "thread-1",
+        turnId: "child-turn",
+        status: "inProgress",
+        threadStatus: "active",
+      });
+    }
+    if (method === "thread/turns/list") {
+      return { data: [], nextCursor: null };
+    }
+    if (method === "turn/start") {
+      return turnStartResult(`turn-${++turns}`);
+    }
+    return undefined;
+  });
+  return {
+    runtime,
+    harness,
+    get turnId() {
+      return `turn-${turns}`;
+    },
+    async startChild() {
+      await harness.notify({
+        method: "thread/started",
+        params: {
+          thread: {
+            id: "child-thread",
+            parentThreadId: "thread-1",
+            source: { subAgent: { thread_spawn: { parent_thread_id: "thread-1", depth: 1 } } },
+          },
+        },
+      });
+      await harness.notify({
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: `turn-${turns}`,
+          item: directSpawnItem("v1", "thread-1", "child-thread"),
+        },
+      });
+      expect(isCodexAppServerLiveThreadProtected(harness.client, "thread-1")).toBe(true);
+    },
+  };
+}
+
 describe("Codex parent continuation with native child custody", () => {
   it.each([false, true])(
     "continues an interrupted parent and delivers its child's result (warm: %s)",
@@ -50,35 +108,9 @@ describe("Codex parent continuation with native child custody", () => {
         requesterSessionKey: params.sessionKey!,
         requesterAgentId: "main",
       };
-      const runtime = createRuntime();
-      const register = codexNativeSubagentMonitorRuntime.register;
-      vi.spyOn(codexNativeSubagentMonitorRuntime, "register").mockImplementation((request) =>
-        register({ ...request, runtime }),
-      );
+      const parent = createParentHarness();
+      const { runtime, harness } = parent;
       const completionAttempts = observeCompletionAttempts();
-      let turns = 0;
-      const harness = createStartedThreadHarness(async (method, request) => {
-        if (method === "thread/resume") {
-          return threadStartResult("thread-1");
-        }
-        if (method === "thread/read") {
-          const { threadId } = request as { threadId: string };
-          return threadRead({
-            childThreadId: threadId,
-            parentThreadId: "thread-1",
-            turnId: "child-turn",
-            status: "inProgress",
-            threadStatus: "active",
-          });
-        }
-        if (method === "thread/turns/list") {
-          return { data: [], nextCursor: null };
-        }
-        if (method === "turn/start") {
-          return turnStartResult(`turn-${++turns}`);
-        }
-        return undefined;
-      });
       if (warm) {
         const initial = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir));
         await initial.waitForTurnAccepted();
@@ -88,28 +120,7 @@ describe("Codex parent continuation with native child custody", () => {
       }
       const first = runCodexAppServerAttempt(params);
       await first.waitForTurnAccepted();
-      const interruptedTurnId = `turn-${turns}`;
-      await harness.notify({
-        method: "thread/started",
-        params: {
-          thread: {
-            id: "child-thread",
-            parentThreadId: "thread-1",
-            source: {
-              subAgent: { thread_spawn: { parent_thread_id: "thread-1", depth: 1 } },
-            },
-          },
-        },
-      });
-      await harness.notify({
-        method: "item/completed",
-        params: {
-          threadId: "thread-1",
-          turnId: interruptedTurnId,
-          item: directSpawnItem("v1", "thread-1", "child-thread"),
-        },
-      });
-      expect(isCodexAppServerLiveThreadProtected(harness.client, "thread-1")).toBe(true);
+      await parent.startChild();
       const binding = await readCodexAppServerBinding(sessionFile);
 
       abort.abort("parent interrupted while child is active");
@@ -127,28 +138,33 @@ describe("Codex parent continuation with native child custody", () => {
       });
       expect(harness.requests.filter(({ method }) => method === "thread/start")).toHaveLength(1);
       expect(harness.requests.filter(({ method }) => method === "thread/resume")).toHaveLength(0);
-      await harness.notify(
-        childTurnCompletedNotification({
-          threadId: "child-thread",
-          turnId: "child-turn",
-          status: "completed",
-          items: [
-            {
-              type: "agentMessage",
-              id: "child-result",
-              phase: "final_answer",
-              text: "child completed",
-            },
-          ],
-        }),
-      );
+      const childCompleted = childTurnCompletedNotification({
+        threadId: "child-thread",
+        turnId: "child-turn",
+        status: "completed",
+        items: [
+          {
+            type: "agentMessage",
+            id: "child-result",
+            phase: "final_answer",
+            text: "child completed",
+          },
+        ],
+      });
+      await harness.notify(childCompleted);
       await completionAttempts.settle();
       expect(runtime.deliverAgentHarnessCompletion).not.toHaveBeenCalled();
-      await harness.completeTurn({ threadId: "thread-1", turnId: `turn-${turns}` });
+      await harness.completeTurn({ threadId: "thread-1", turnId: parent.turnId });
       expect((await next).terminal).toEqual({ kind: "ok" });
       await completionAttempts.settle();
+      await harness.notify(childCompleted);
+      await completionAttempts.settle();
       expect(runtime.deliverAgentHarnessCompletion).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ result: "child completed" }),
+        expect.objectContaining({
+          result: "child completed",
+          scope: params.agentHarnessCompletionScope,
+          expectedRequester: expect.objectContaining({ sessionId: params.sessionId }),
+        }),
       );
     },
   );
@@ -237,23 +253,8 @@ describe("Codex parent continuation with native child custody", () => {
         };
         return resources;
       });
-      const runtime = createRuntime();
-      const register = codexNativeSubagentMonitorRuntime.register;
-      vi.spyOn(codexNativeSubagentMonitorRuntime, "register").mockImplementation((request) =>
-        register({ ...request, runtime }),
-      );
-      const harness = createStartedThreadHarness(async (method, request) => {
-        if (method === "thread/read") {
-          return threadRead({
-            childThreadId: (request as { threadId: string }).threadId,
-            parentThreadId: "thread-1",
-            turnId: "child-turn",
-            status: "inProgress",
-            threadStatus: "active",
-          });
-        }
-        return undefined;
-      });
+      const parent = createParentHarness();
+      const { harness } = parent;
       const run = runCodexAppServerAttempt(params, {
         nativeHookRelay: { enabled: true, events: ["pre_tool_use"] },
       });
@@ -276,26 +277,8 @@ describe("Codex parent continuation with native child custody", () => {
           tool_input: { command: "allow-child" },
         },
       });
-      await harness.notify({
-        method: "thread/started",
-        params: {
-          thread: {
-            id: "child-thread",
-            parentThreadId: "thread-1",
-            source: { subAgent: { thread_spawn: { parent_thread_id: "thread-1", depth: 1 } } },
-          },
-        },
-      });
-      await harness.notify({
-        method: "item/completed",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: directSpawnItem("v1", "thread-1", "child-thread"),
-        },
-      });
+      await parent.startChild();
       await expect(childAdmission).resolves.toEqual({ stdout: "", stderr: "", exitCode: 0 });
-      expect(isCodexAppServerLiveThreadProtected(harness.client, "thread-1")).toBe(true);
       try {
         const response = await harness.handleServerRequest({
           id: "yield-parent",
