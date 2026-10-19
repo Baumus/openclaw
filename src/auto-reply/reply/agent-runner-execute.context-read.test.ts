@@ -12,11 +12,14 @@ import type { InternalSessionEntry } from "../../config/sessions/types.js";
 import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
 import { runBeforeAgentReplyForTurn } from "../../plugins/before-agent-reply.js";
 import { withSessionTurn } from "../../sessions/session-controller.admission.js";
+import { captureSessionTarget } from "../../sessions/session-controller.lifecycle.js";
+import { createReplyOperation } from "../../sessions/session-controller.operation.js";
 import { createUserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { executePreparedReplyAgentRun } from "./agent-runner-execute.js";
 import { executeAgentTurn } from "./agent-runner-execution.js";
 import { createTestFollowupRun } from "./agent-runner.test-fixtures.js";
+import { createGoalChildReturnFixture } from "./goal-child-return.test-support.js";
 import { createReplyRestartRecoveryClaimController } from "./restart-recovery-claim.js";
 import { createMockReplyOperation, createMockTypingController } from "./test-helpers.js";
 import { createTypingSignaler } from "./typing-mode.js";
@@ -196,3 +199,109 @@ it("keeps a cron context prefix readable when an inbound turn persists before qu
     }
   });
 });
+
+it.each(["openclaw", "codex", "external"])(
+  "retains child-return goal ownership through initial %s execution",
+  async (harnessId) => {
+    await withOpenClawTestState({ label: "goal-initial-child-return" }, async (state) => {
+      const target = {
+        agentId: "main",
+        sessionId: "goal-initial-session",
+        sessionKey: "agent:main:main",
+        storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
+      };
+      const fixture = createGoalChildReturnFixture({ ...target, harnessId });
+      let entry = fixture.entry;
+      await replaceSessionEntry(target, entry);
+      const recovery = createReplyRestartRecoveryClaimController({
+        ...target,
+        acquireSessionActor: async () => undefined,
+        admissionRunId: "initial-runtime",
+        lifecycleGeneration: getAgentEventLifecycleGeneration(),
+        getEntry: () => entry,
+        getSessionId: () => target.sessionId,
+        setEntry: (next) => {
+          entry = next;
+        },
+        isRestartAbort: () => false,
+        resolveDeliveryContext: () => ({ channel: "telegram", to: "synthetic-chat" }),
+      });
+      const typing = createMockTypingController();
+      const followupRun = createTestFollowupRun(target);
+      const replyOperation = createReplyOperation({
+        target: captureSessionTarget({
+          storeScope: target.storePath,
+          sessionKey: target.sessionKey,
+          agentId: target.agentId,
+          incarnation: target.sessionId,
+        }),
+        sessionKey: target.sessionKey,
+        sessionId: target.sessionId,
+        resetTriggered: false,
+      });
+      vi.mocked(executeAgentTurn).mockImplementationOnce(async () => {
+        fixture.yield("initial-runtime");
+        return {
+          runId: "initial-runtime",
+          outcome: {
+            kind: "settled",
+            status: "ok",
+            result: { meta: { durationMs: 0 } },
+            resolved: { provider: "test", model: "test" },
+            fallback: { exhausted: false, attempts: [] },
+            autoCompactionCount: 0,
+          },
+        };
+      });
+      try {
+        await executePreparedReplyAgentRun({
+          ...target,
+          ...recovery,
+          followupRun,
+          replyOperation,
+          typing,
+          activeIsNewSession: false,
+          activeSessionStore: undefined,
+          cfg: {},
+          commandBody: "Continue the goal",
+          defaultModel: "test",
+          isHeartbeat: false,
+          queueKey: target.sessionKey,
+          resolvedQueue: { mode: "followup" },
+          sessionCtx: { Provider: "telegram" },
+          blockReplyPipeline: null,
+          blockStreamingEnabled: false,
+          resolvedBlockStreamingBreak: "message_end",
+          resolvedVerboseLevel: "off",
+          shouldInjectGroupIntro: false,
+          pendingToolTasks: new Set(),
+          preflightCompactionApplied: false,
+          replyMediaContext: { normalizePayload: async (payload) => payload },
+          replyRouteThreadId: undefined,
+          replyToChannel: "telegram",
+          replyToMode: "off",
+          typingMode: "never",
+          typingSignals: createTypingSignaler({ typing, mode: "never", isHeartbeat: false }),
+          applyReplyToMode: (payload) => payload,
+          getActiveSessionEntry: () => entry,
+          isRestartRecoveryArmed: recovery.isArmed,
+          onCompactionNoticePayload: () => {},
+          resolveVisibleReplyDelivery: async () => false,
+          returnWithQueuedFollowupDrain: (value) => value,
+          setRunFollowupTurn: () => {},
+          runFollowupTurn: async () => {},
+          shouldEmitToolOutput: () => false,
+          shouldEmitToolResult: () => false,
+          traceAgentPhase: async (_name, run) => await run(),
+        });
+        expect(fixture.readReturnedContext()?.text).toEqual(
+          harnessId === "external" ? undefined : expect.stringContaining("Finish the caller goal"),
+        );
+      } finally {
+        fixture.close();
+        replyOperation.complete();
+        await replyOperation.ownerSettlement;
+      }
+    });
+  },
+);

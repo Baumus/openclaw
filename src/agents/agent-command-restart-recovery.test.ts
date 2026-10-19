@@ -11,6 +11,28 @@ import { hasMessagingToolDeliveryToSource } from "./subagents/announce/subagent-
 import { createDirectAnnounceResponseClassifier } from "./subagents/announce/subagent-announce-direct-response.js";
 
 describe("buildCurrentRunRestartRecoveryClaim", () => {
+  it("keeps a continuation bound to its goal on recovery and clears it for unrelated work", () => {
+    const continuation = {
+      sessionId: "session-1",
+      lifecycleRevision: "revision-1",
+      goalId: "goal-1",
+    };
+    const entry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      restartRecoveryDeliveryRunId: "recovery-run",
+      restartRecoveryGoalContinuation: continuation,
+    };
+    expect(buildCurrentRunRestartRecoveryClaim({ entry, runId: "recovery-run" })).toHaveProperty(
+      "restartRecoveryGoalContinuation",
+      continuation,
+    );
+    expect(buildCurrentRunRestartRecoveryClaim({ entry, runId: "unrelated-run" })).toHaveProperty(
+      "restartRecoveryGoalContinuation",
+      undefined,
+    );
+  });
+
   const scopedPolicy = {
     restartRecoveryDisableMessageTool: true,
     restartRecoverySourceIngress: "internal",

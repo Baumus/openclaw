@@ -1,13 +1,31 @@
-import { expect, it, type MockInstance } from "vitest";
+import { expect, it, vi, type MockInstance } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { createAdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 import {
   detachActiveEmbeddedRun,
   attachActiveEmbeddedRun,
 } from "../agents/embedded-agent-runner/runs.js";
 import type { runEmbeddedAgent as executeEmbeddedAgent } from "../agents/embedded-agent.js";
+import { registerAgentHarness, getRegisteredAgentHarness } from "../agents/harness/registry.js";
+import { discoverRestartRecoveryStoreTargets } from "../agents/main-session-recovery/main-session-restart-recovery-shared.js";
+import * as runtimePlugins from "../agents/runtime-plugins.js";
+import { stageGoalContinuationPendingInput } from "../auto-reply/reply/goal-continuation-pending.js";
+import * as followupQueue from "../auto-reply/reply/queue/enqueue.js";
+import * as replyPreparation from "../auto-reply/reply/reply-agent-turn-preparation.js";
+import { getRuntimeConfig } from "../config/config.js";
 import { loadSessionEntry, patchSessionEntryCore } from "../config/sessions/session-accessor.js";
+import { readPendingInputRecoveryEntriesInWorker } from "../config/sessions/session-entry-read-maintenance.js";
+import { readGoalContinuationRecoveryPage } from "../config/sessions/session-pending-input-history.js";
 import { waitForGatewayActiveWork } from "../infra/gateway-active-work.js";
-import type { RespondFn } from "./server-methods/types.js";
+import { ensureProfileForEmail } from "../state/user-profiles.js";
+import {
+  buildRecoveredGoalFollowup,
+  recoverGoalContinuations,
+} from "./goal-continuation-recovery.js";
+import * as operatorRecovery from "./operator-run-recovery.js";
+import type { GatewayRequestContext, GatewayClient, RespondFn } from "./server-methods/types.js";
+import { prepareGatewayReplyRuntimeForTest } from "./test-helpers.js";
+import { getTestPluginRegistry } from "./test-helpers.plugin-registry.js";
 
 /** Reuse the suite's admission, queue and reply owners; only provider execution is simulated. */
 export function registerGoalAutomaticContinuationCases(
@@ -16,22 +34,121 @@ export function registerGoalAutomaticContinuationCases(
   rpc: (
     method: "chat.send" | "sessions.abort",
     params: Record<string, unknown>,
+    onResponse?: RespondFn,
+    client?: GatewayClient,
   ) => Promise<MockInstance<RespondFn>>,
   goalStart: (message: string) => Record<string, unknown>,
   userMessages: () => readonly unknown[],
+  client: GatewayClient,
+  gatewayContext: () => GatewayRequestContext,
 ) {
-  it("nudges consecutive normal final turns until the same Goal is complete", async () => {
-    const completed = createDeferred();
+  it("replays an accepted pending Goal through consecutive followup turns", async () => {
+    using enqueue = vi.spyOn(followupQueue, "enqueueFollowupRun");
+    using prepare = vi.spyOn(replyPreparation, "prepareReplyAgentTurn");
+    using warn = vi.spyOn(gatewayContext().logGateway, "warn");
+    const identity = scope();
+    const savedGoal = {
+      schemaVersion: 1 as const,
+      id: "recovered-goal",
+      objective: "Finish after restart",
+      status: "active" as const,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      tokenStart: 0,
+      tokensUsed: 0,
+      continuationTurns: 0,
+    };
+    await patchSessionEntryCore(identity, () => ({ goal: savedGoal }));
+    const entry = loadSessionEntry(identity)!;
+    const runId = "recovered-goal-input";
+    const prompt = "Advance the active goal";
+    let holds = 1;
+    const recoveryProfile = ensureProfileForEmail("goal-recovery@example.test");
+    const authority = createAdmittedRunOperatorAuthority({
+      profileId: recoveryProfile.id,
+      scopes: ["operator.read", "operator.write", "operator.admin"],
+      recoverySnapshot: {
+        profileId: recoveryProfile.id,
+        scopes: ["operator.read", "operator.write", "operator.admin"],
+        assignedRole: null,
+        githubLogin: null,
+        grant: null,
+        aliasBindingIds: [],
+        authPolicy: {
+          generation: "",
+          grantGeneration: "fixture",
+          role: "operator",
+          authMethod: "token",
+        },
+        controlUiAdmin: true,
+        localOperator: true,
+        sourceIngress: "internal",
+        modelPolicy: undefined,
+      },
+      assertCurrent() {
+        if (holds <= 0) {
+          throw new Error("recovery authority released");
+        }
+      },
+      retain() {
+        holds++;
+        return () => {
+          holds--;
+        };
+      },
+    });
+    const nudge = buildRecoveredGoalFollowup({
+      context: gatewayContext(),
+      entry,
+      sessionKey: identity.sessionKey,
+      operatorAuthority: authority,
+      goal: {
+        version: 1,
+        runId,
+        agentId: identity.agentId,
+        sessionKey: identity.sessionKey,
+        continuation: {
+          sessionId: entry.sessionId,
+          lifecycleRevision: entry.lifecycleRevision,
+          goalId: savedGoal.id,
+        },
+        prompt,
+        operatorSource: undefined,
+      },
+    });
+    await stageGoalContinuationPendingInput({ nudge, entry, ...identity, assertCurrent() {} });
+    const accepted = nudge.userTurnTranscriptRecorder;
+    expect(accepted).toBeDefined();
+    accepted!.finishPendingInput!("interrupted");
+    await accepted!.waitForPendingInputSettlement!();
+    const targets = await discoverRestartRecoveryStoreTargets({
+      cfg: gatewayContext().getRuntimeConfig(),
+    });
+    const target = targets.find((candidate) => candidate.storePath === identity.storePath);
+    expect(target, "restart inventory must discover the accepted input's store").toBeDefined();
+    expect(await readPendingInputRecoveryEntriesInWorker(target!)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sessionKey: identity.sessionKey })]),
+    );
+    expect((await readGoalContinuationRecoveryPage(identity)).items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ runId, state: "interrupted" })]),
+    );
+    using restored = vi
+      .spyOn(operatorRecovery, "restoreGatewayQueuedOperatorRecovery")
+      .mockResolvedValue({
+        authority,
+        controlUiAdmin: true,
+        release: () => {
+          holds--;
+        },
+      });
     runEmbeddedAgent.mockImplementation(async (params) => {
-      const calls = runEmbeddedAgent.mock.calls.length;
-      if (calls === 3) {
-        await patchSessionEntryCore(scope(), (entry) => ({
-          goal: entry.goal ? { ...entry.goal, status: "complete" } : undefined,
+      if (runEmbeddedAgent.mock.calls.length === 2) {
+        await patchSessionEntryCore(identity, (current) => ({
+          goal: current.goal ? { ...current.goal, status: "complete" } : undefined,
         }));
-        completed.resolve();
       }
       return {
-        payloads: [{ text: calls === 3 ? "Verified the goal." : "More work remains." }],
+        payloads: [{ text: "Advance verified" }],
         meta: {
           durationMs: 0,
           stopReason: "end_turn",
@@ -44,20 +161,131 @@ export function registerGoalAutomaticContinuationCases(
         },
       };
     });
-    const started = await rpc("chat.send", goalStart("Finish a three-turn checklist"));
-    expect(started.mock.calls[0]?.[0]).toBe(true);
-    await completed.promise;
-    const drained = await waitForGatewayActiveWork(30_000);
-    expect(drained.drained).toBe(true);
-    expect(runEmbeddedAgent).toHaveBeenCalledTimes(3);
-    expect(runEmbeddedAgent.mock.calls[1]?.[0].prompt).toContain("Advance");
-    expect(runEmbeddedAgent.mock.calls[2]?.[0].prompt).toContain("Advance");
-    expect(userMessages()).toHaveLength(1);
-    expect(loadSessionEntry(scope())?.goal).toMatchObject({
-      status: "complete",
-      continuationTurns: 2,
+    await recoverGoalContinuations(gatewayContext(), new AbortController().signal);
+    expect(restored, "recovery must restore accepted input authority").toHaveBeenCalledOnce();
+    expect(
+      warn.mock.calls,
+      "recovery must accept the persisted input without an admission failure",
+    ).toEqual([]);
+    expect(enqueue).toHaveReturnedWith(true);
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalled(), { timeout: 5_000 });
+    await vi.waitFor(
+      () =>
+        expect(prepare.mock.settledResults[0]).toMatchObject({
+          type: "fulfilled",
+          value: { kind: "admitted" },
+        }),
+      { timeout: 5_000 },
+    );
+    await vi.waitFor(() => expect(runEmbeddedAgent).toHaveBeenCalledTimes(2), {
+      timeout: 15_000,
     });
+    expect((await waitForGatewayActiveWork(30_000)).drained).toBe(true);
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
+    expect(restored).toHaveBeenCalledOnce();
+    expect(loadSessionEntry(identity)?.goal?.status).toBe("complete");
+    await recoverGoalContinuations(gatewayContext(), new AbortController().signal);
+    expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["openclaw", "codex"])(
+    "nudges consecutive %s final turns until the same Goal is complete",
+    async (harnessId) => {
+      using loadNative = vi.spyOn(runtimePlugins, "loadAgentRuntimePluginRegistryHandle");
+      if (harnessId === "codex") {
+        registerAgentHarness({
+          id: "codex",
+          label: "Codex fixture",
+          supports: () => ({ supported: true, priority: 100 }),
+          runAttempt: async () => {
+            throw new Error("provider transport is simulated");
+          },
+        });
+        getTestPluginRegistry().agentHarnesses.push({
+          pluginId: "codex",
+          source: "fixture",
+          harness: getRegisteredAgentHarness("codex")!.harness,
+        });
+        loadNative.mockReturnValue(getTestPluginRegistry());
+        const baseline = getRuntimeConfig();
+        await prepareGatewayReplyRuntimeForTest({
+          force: true,
+          config: {
+            ...baseline,
+            plugins: {
+              ...baseline.plugins,
+              entries: { ...baseline.plugins?.entries, codex: { enabled: true } },
+            },
+            agents: {
+              ...baseline.agents,
+              entries: {
+                ...baseline.agents?.entries,
+                main: { ...baseline.agents?.entries?.main, nativeRuntimeConsent: ["codex"] },
+              },
+            },
+          },
+        });
+        await patchSessionEntryCore(scope(), () => ({
+          agentHarnessId: "codex",
+          modelSelectionLocked: true,
+        }));
+      }
+      const completed = createDeferred();
+      runEmbeddedAgent.mockImplementation(async (params) => {
+        const calls = runEmbeddedAgent.mock.calls.length;
+        if (calls === 3) {
+          await patchSessionEntryCore(scope(), (entry) => ({
+            goal: entry.goal ? { ...entry.goal, status: "complete" } : undefined,
+          }));
+          completed.resolve();
+        }
+        return {
+          payloads: [{ text: calls === 3 ? "Verified the goal." : "More work remains." }],
+          meta: {
+            durationMs: 0,
+            stopReason: "end_turn",
+            agentMeta: {
+              sessionId: params.sessionId,
+              provider: "test",
+              model: "test",
+              usage: { input: 1, output: 1 },
+            },
+          },
+        };
+      });
+      const profile =
+        harnessId === "codex" ? ensureProfileForEmail("local-codex-goal@example.test") : undefined;
+      const operator = profile
+        ? {
+            ...client,
+            authenticatedUserProfile: {
+              profileId: profile.id,
+              displayName: null,
+              hasAvatar: false,
+              updatedAt: 1,
+            },
+          }
+        : client;
+      const started = await rpc(
+        "chat.send",
+        goalStart("Finish a three-turn checklist"),
+        undefined,
+        operator,
+      );
+      expect(started.mock.calls[0]?.[0]).toBe(true);
+      await completed.promise;
+      const drained = await waitForGatewayActiveWork(30_000);
+      expect(drained.drained).toBe(true);
+      expect(runEmbeddedAgent).toHaveBeenCalledTimes(3);
+      expect(runEmbeddedAgent.mock.calls[1]?.[0].prompt).toContain("Advance");
+      expect(runEmbeddedAgent.mock.calls[2]?.[0].prompt).toContain("Advance");
+      expect(userMessages()).toHaveLength(1);
+      expect(loadSessionEntry(scope())?.goal).toMatchObject({
+        status: "complete",
+        continuationTurns: 2,
+      });
+    },
+  );
 
   it("stops automatic goal pursuit when the operator stops a continuation", async () => {
     const { sessionKey } = scope();

@@ -103,6 +103,30 @@ export function bindGoalContinuationExecution(runId: string, sessionKey: string 
   }
 }
 
+/** Recovered commands lend the same admitted Goal owner to their harness and child return. */
+export function withGoalContinuationCommand<T>(
+  params: { runId: string; sessionKey?: string; entry: SessionEntry },
+  run: () => T,
+): T {
+  const owner = goalReturns.getStore();
+  if (!owner || owner.closed || owner.params.sessionKey !== params.sessionKey) {
+    return run();
+  }
+  owner.sourceRunId = params.runId;
+  return goalSettlements.run(
+    {
+      owner,
+      runId: params.runId,
+      entry: params.entry,
+      isCurrent: () =>
+        !owner.closed &&
+        !owner.signal.aborted &&
+        owner.generation === getAgentRunLifecycleGeneration(),
+    },
+    run,
+  );
+}
+
 /** The committed yield publisher binds the return before the completion wake becomes eligible. */
 export function promoteGoalContinuationYield(params: {
   entries: readonly SubagentRunRecord[];

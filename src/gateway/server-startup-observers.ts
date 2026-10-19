@@ -127,6 +127,21 @@ export async function runGatewayStartupObservers(params: {
                   );
                 }
               }
+              // Session delivery recovery joins pending agent preparation before
+              // returning; its delivery failures must not skip accepted Goal work.
+              if (!params.signal.aborted && !params.isClosing?.()) {
+                try {
+                  const { recoverGoalContinuations } =
+                    await import("./goal-continuation-recovery.js");
+                  await recoverGoalContinuations(context, params.signal);
+                } catch (error) {
+                  if (!params.signal.aborted) {
+                    params.log.warn(
+                      `Goal restart recovery could not complete; saved inputs remain available: ${formatErrorMessageForDisplay(error, formatErrorMessageWithCode(error))}`,
+                    );
+                  }
+                }
+              }
             }
           })(),
           (async () => {

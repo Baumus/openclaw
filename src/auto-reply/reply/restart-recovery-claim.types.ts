@@ -36,6 +36,7 @@ export type ReplyRestartRecoveryClaimController = {
 
 export type ReplyRestartRecoveryClaimControllerParams = {
   agentId: string;
+  goalContinuation?: SessionEntry["restartRecoveryGoalContinuation"];
   operationAdmission?: ReplyOperationAdmission;
   acquireSessionActor: () => Promise<
     | {

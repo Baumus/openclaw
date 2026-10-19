@@ -27,10 +27,11 @@ validation, session authority, and effect ownership still apply. Dashboard and
 widget actions use these session-bound tools; a shell CLI connection and device
 pairing do not replace them. OpenClaw normally does
 not expose dynamic tools that duplicate Codex-native workspace operations:
-`read`, `write`, `edit`, `apply_patch`, `exec`, `process`,
-`get_goal`, `create_goal`, `update_goal`, `dispatch_action`, `tool_describe`,
-and `tool_search`. Goal operations stay native to Codex,
-so OpenClaw does not project a second goal store into Codex turns. Most
+`read`, `write`, `edit`, `apply_patch`, `exec`, and `process`.
+Goal operations use OpenClaw's `get_goal`, `create_goal`, and `update_goal`
+tools and the shared [Goal continuation queue](/tools/goal#automatic-continuation).
+Codex's native autonomous Goal engine remains disabled so that each continuation
+gets a fresh admitted turn with current tool, hook, and permission lifetimes. Most
 remaining OpenClaw integration tools, such as messaging, media, cron,
 browser, nodes, gateway, `progress_card`, and `heartbeat_respond` are available through
 Codex tool search under the `openclaw` namespace, keeping the initial model

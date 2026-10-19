@@ -598,6 +598,8 @@ export const databaseWorkerCoreTestFiles = [
   "src/auto-reply/reply/agent-runner-direct-runtime-config.test.ts",
   "src/auto-reply/reply/agent-runner-recovery-read.test.ts",
   "src/auto-reply/reply/agent-runner-execute.context-read.test.ts",
+  // Goal child-return completion retains the real physical database admission owner.
+  "src/auto-reply/reply/followup-runner.test.ts",
   // The shared execution fixture binds real physical database admission before each turn.
   "src/auto-reply/reply/agent-runner-execution-auth-failures.test.ts",
   "src/auto-reply/reply/agent-runner-execution-cli-admission.test.ts",

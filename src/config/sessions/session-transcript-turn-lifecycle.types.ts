@@ -33,6 +33,7 @@ export type SessionTranscriptTurnExpectedState = {
 
 /** Lifecycle fields committed with an accepted transcript turn. */
 export type SessionTranscriptTurnLifecyclePatch = {
+  restartRecoveryGoalContinuation?: SessionRestartRecoveryState["restartRecoveryGoalContinuation"];
   abortedLastRun?: boolean;
   endedAt?: number;
   lifecycleRunId?: SessionEntry["lifecycleRunId"];

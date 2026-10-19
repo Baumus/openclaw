@@ -8,6 +8,7 @@ import { readSessionEntryInWorker } from "../../config/sessions/session-entry-re
 import type { TypingMode } from "../../config/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { GatewayContextResolver } from "../../gateway/server-methods/types.js";
+import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import { formatErrorMessage, toErrorObject } from "../../infra/errors.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import type { ReplyOperation, ReplyTurnKind } from "../../sessions/session-controller.js";
@@ -40,7 +41,7 @@ import {
 } from "./compaction-notice.js";
 import { settleQueuedFollowupPresentation } from "./followup-presentation.js";
 import type { InternalGetReplyOptions } from "./get-reply.types.js";
-import { isGoalContinuationCurrent, isSupportedWorkerGoalPlacement } from "./goal-continuation.js";
+import { isGoalContinuationCurrent, resolveCodexGoalPlacement } from "./goal-continuation.js";
 import { refreshActiveGoalContext } from "./inbound-meta.js";
 import { getFollowupQueueDepth } from "./queue/enqueue.js";
 import {
@@ -164,6 +165,13 @@ export async function prepareReplyAgentTurn<TConfigured>(
         kind: "skipped",
         reason: resolveFollowupAbortSignal(params.queued)?.aborted ? "aborted" : "active-run",
       } as const;
+    }
+    if (params.queued.goalContinuationReady) {
+      params.queued.userTurnTranscriptRecorder = await racePromiseWithAbortSignal(
+        params.queued.goalContinuationReady,
+        resolveFollowupAbortSignal(params.queued),
+      );
+      assertOperatorCurrent();
     }
     const replySessionKey = params.queued.run.sessionKey ?? params.defaults.sessionKey;
     const initialStoredEntry = replySessionKey
@@ -556,17 +564,21 @@ export async function prepareReplyAgentTurn<TConfigured>(
                 sessionKey: replySessionKey,
               })
             : session.current();
-        const workerPlacementCurrent =
-          !goalContinuation.workerGoal ||
-          (Boolean(params.queued.operatorAuthority) &&
-            (await isSupportedWorkerGoalPlacement({
-              agentId: run.agentId,
-              sessionKey: replySessionKey ?? "",
-              sessionId: goalContinuation.sessionId,
-            })));
+        const codexPlacement =
+          currentEntry?.agentHarnessId === "codex" && params.queued.operatorAuthority
+            ? await resolveCodexGoalPlacement({
+                agentId: run.agentId,
+                sessionKey: replySessionKey ?? "",
+                sessionId: goalContinuation.sessionId,
+                requiresWorker: Boolean(run.config?.cloudWorkers?.requiredProfile),
+              })
+            : undefined;
+        const placementCurrent =
+          currentEntry?.agentHarnessId !== "codex" ||
+          codexPlacement === (goalContinuation.workerGoal ? "worker" : "local");
         assertOperatorCurrent();
         if (
-          !workerPlacementCurrent ||
+          !placementCurrent ||
           operation.abortSignal.aborted ||
           !isGoalContinuationCurrent(goalContinuation, currentEntry) ||
           getFollowupQueueDepth(replySessionKey ?? "") > 0

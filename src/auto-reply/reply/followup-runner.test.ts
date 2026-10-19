@@ -1,6 +1,8 @@
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { createAdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
+import { replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 import {
   resolveSessionTranscriptReadFence,
   runWithSessionTranscriptReadFence,
@@ -10,9 +12,14 @@ import {
   getPluginRuntimeGatewayRequestScope,
   withPluginRuntimeGatewayRequestScope,
 } from "../../plugins/runtime/gateway-request-scope.js";
+import { defaultRuntime } from "../../runtime.js";
+import { captureSessionTarget } from "../../sessions/session-controller.lifecycle.js";
+import { createReplyOperation } from "../../sessions/session-controller.operation.js";
+import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
 import type { FollowupExecutionResult } from "./followup-turn-execution.js";
+import { createGoalChildReturnFixture } from "./goal-child-return.test-support.js";
 import type { FollowupRun } from "./queue.js";
 import type { AdmittedFollowupTurn } from "./reply-agent-turn-preparation.js";
 
@@ -27,7 +34,8 @@ const state = vi.hoisted(() => ({
   clearRunContext: vi.fn(),
 }));
 
-vi.mock("../../infra/agent-run-registry.js", () => ({
+vi.mock("../../infra/agent-run-registry.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../infra/agent-run-registry.js")>()),
   clearAgentRunContext: (...args: unknown[]) => state.clearRunContext(...args),
 }));
 
@@ -164,6 +172,72 @@ beforeEach(() => {
 });
 
 describe("createFollowupRunner", () => {
+  it.each(["openclaw", "codex", "external"])(
+    "retains child-return Goal custody through the real follow-up caller (%s)",
+    async (harnessId) => {
+      await withOpenClawTestState({ label: "goal-followup-child-return" }, async (testState) => {
+        const target = {
+          agentId: "agent",
+          sessionKey: "main",
+          sessionId: "session",
+          storePath: path.join(testState.agentDir("agent"), "openclaw-agent.sqlite"),
+        };
+        const fixture = createGoalChildReturnFixture({
+          agentId: "agent",
+          sessionKey: "main",
+          sessionId: "session",
+          harnessId,
+        });
+        await replaceSessionEntry(target, fixture.entry);
+        const operation = createReplyOperation({
+          target: captureSessionTarget({
+            storeScope: target.storePath,
+            sessionKey: target.sessionKey,
+            agentId: target.agentId,
+            incarnation: target.sessionId,
+          }),
+          sessionKey: "main",
+          sessionId: "session",
+          resetTriggered: false,
+        });
+        const turn: AdmittedFollowupTurn = {
+          ...createTurn(),
+          operation,
+          session: {
+            kind: "session",
+            key: "main",
+            storePath: target.storePath,
+            current: () => fixture.entry,
+            publish() {},
+          },
+        };
+        state.admit.mockResolvedValue({ kind: "admitted", turn });
+        state.execute.mockImplementation(async () => {
+          fixture.yield(turn.runId);
+          return createSettledExecution();
+        });
+        state.account.mockResolvedValue(undefined);
+        state.deliver.mockResolvedValue({ kind: "completed", payloads: [] });
+        try {
+          await createFollowupRunner({
+            typing: createTypingController(),
+            typingMode: "never",
+            defaultModel: "claude",
+          })(turn.queued);
+          expect(defaultRuntime.error).not.toHaveBeenCalled();
+          expect(operation.result).toEqual({ kind: "completed" });
+          expect(fixture.readReturnedContext()?.text.includes("Finish the caller goal")).toBe(
+            harnessId === "external" ? undefined : true,
+          );
+        } finally {
+          fixture.close();
+          operation.complete();
+          await operation.ownerSettlement;
+        }
+      });
+    },
+  );
+
   it.each([
     { kind: "pending", failed: false },
     { kind: "pending", failed: true },

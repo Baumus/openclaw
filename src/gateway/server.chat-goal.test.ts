@@ -279,7 +279,15 @@ async function waitForModelRun(count = 1) {
 }
 
 describe("Goal chat admission and continuation", () => {
-  registerGoalAutomaticContinuationCases(scope, runEmbeddedAgent, rpc, goalStart, userMessages);
+  registerGoalAutomaticContinuationCases(
+    scope,
+    runEmbeddedAgent,
+    rpc,
+    goalStart,
+    userMessages,
+    client,
+    () => context,
+  );
 
   registerGoalChatRestartSettlementCase({
     scope,

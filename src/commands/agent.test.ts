@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, type MockInstance, vi } from "vitest"
 import "./agent-command.test-mocks.js";
 import "./agent-command-attempt.test-mocks.js";
 import { testing as acpManagerTesting } from "../acp/control-plane/manager.js";
+import { createAdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 import { executionIdentity } from "../agents/agent-command-execution-identity.js";
 import { createHostWorkspaceWriteTool } from "../agents/agent-tools.read.js";
 import * as authProfileStoreModule from "../agents/auth-profiles/store-runtime.js";
@@ -32,6 +33,8 @@ import { callInProcessGatewayTool } from "../agents/tools/in-process-gateway.js"
 import type * as AgentWorkspaceModule from "../agents/workspace.js";
 import { ensureAgentWorkspace } from "../agents/workspace.js";
 import { managedWorktrees } from "../agents/worktrees/service.js";
+import * as goalContinuationReturn from "../auto-reply/reply/goal-continuation-return.js";
+import * as goalQueue from "../auto-reply/reply/queue/enqueue.js";
 import { BASE_THINKING_LEVELS } from "../auto-reply/thinking.shared.js";
 import {
   readAgentRunTerminalError,
@@ -414,6 +417,110 @@ beforeEach(() => {
 });
 
 describe("agentCommand", () => {
+  it.each([
+    { harness: "openclaw", failed: false, expected: true },
+    { harness: "codex", failed: false, expected: true },
+    { harness: "codex", failed: true, expected: false },
+    { harness: "external", failed: false, expected: false },
+  ])(
+    "records host Goal settlement at command completion ($harness, failed=$failed)",
+    async ({ harness, failed, expected }) => {
+      await withTempHome(async (home) => {
+        mockConfig(home, path.join(home, "sessions.json"));
+        using settlement = vi.spyOn(goalContinuationReturn, "recordGoalContinuationSettlement");
+        const result = createDefaultAgentResult();
+        vi.mocked(runEmbeddedAgent).mockResolvedValue({
+          ...result,
+          payloads: failed ? [{ text: "Provider unavailable", isError: true }] : result.payloads,
+          meta: {
+            ...result.meta,
+            ...(failed
+              ? { error: { kind: "incomplete_turn" as const, message: "Provider unavailable" } }
+              : {}),
+            agentMeta: { ...result.meta.agentMeta, agentHarnessId: harness },
+            stopReason: "end_turn",
+          },
+        });
+        await agentCommand(
+          { message: "Continue the requested goal", sessionKey: "agent:main:goal-settlement" },
+          runtime,
+        );
+        expect(settlement).toHaveBeenCalledWith(expect.objectContaining({ succeeded: expected }));
+      });
+    },
+  );
+
+  it.each(["active", "complete", "failed"] as const)(
+    "hands recovered Goal command completion to its current queue (%s)",
+    async (mode) => {
+      await withTempHome(async (home) => {
+        const storePath = path.join(home, "sessions.json");
+        mockConfig(home, storePath);
+        const sessionKey = "agent:main:goal-recovery";
+        const sessionId = "goal-recovery-session";
+        const continuation = { sessionId, goalId: "goal-recovery" };
+        await writeSessionStoreSeed(storePath, {
+          [sessionKey]: {
+            sessionId,
+            updatedAt: Date.now(),
+            restartRecoveryGoalContinuation: continuation,
+            restartRecoveryDeliveryRunId: "goal-recovery-run",
+            restartRecoveryDeliverySourceRunId: "goal-source-run",
+            restartRecoverySourceIngress: "control-ui",
+            goal: {
+              schemaVersion: 1,
+              id: continuation.goalId,
+              status: mode === "complete" ? "complete" : "active",
+              objective: "Finish recovery",
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              tokenStart: 0,
+              tokensUsed: 0,
+              continuationTurns: 0,
+            },
+          },
+        });
+        const assertCurrent = vi.fn();
+        const operatorAuthority = createAdmittedRunOperatorAuthority({
+          profileId: "goal-operator",
+          scopes: ["operator.admin"],
+          assertCurrent,
+        });
+        using enqueue = vi.spyOn(goalQueue, "enqueueFollowupRun").mockReturnValue(true);
+        const result = createDefaultAgentResult({ sessionId });
+        vi.mocked(runEmbeddedAgent).mockResolvedValue({
+          ...result,
+          payloads:
+            mode === "failed" ? [{ text: "Provider unavailable", isError: true }] : result.payloads,
+          meta: {
+            ...result.meta,
+            ...(mode === "failed"
+              ? { error: { kind: "incomplete_turn" as const, message: "Provider unavailable" } }
+              : {}),
+            stopReason: "end_turn",
+            agentMeta: { ...result.meta.agentMeta, agentHarnessId: "codex" },
+          },
+        });
+        await agentCommand(
+          {
+            message: "Continue recovery",
+            sessionKey,
+            sessionId,
+            operatorAuthority,
+            runId: "goal-recovery-run",
+          },
+          runtime,
+        );
+        expect(assertCurrent).toHaveBeenCalled();
+        expect(enqueue).toHaveBeenCalledTimes(mode === "active" ? 1 : 0);
+        if (mode === "active") {
+          expect(enqueue.mock.calls[0]?.[1].goalContinuation).toEqual(continuation);
+          expect(enqueue.mock.calls[0]?.[1].operatorAuthority).toBe(operatorAuthority);
+        }
+      });
+    },
+  );
+
   it("delivers a real local Gateway tool result through the normal CLI admission", async () => {
     await withTempHome(async (home) => {
       mockConfig(home, path.join(home, "sessions.json"));

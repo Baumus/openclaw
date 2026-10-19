@@ -73,17 +73,18 @@ subagent source restoration before attempting to resume interrupted work.
 
 ## What survives a restart
 
-| State                          | Storage                                                | Behavior across restart                                                   |
-| ------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Conversation history           | Per-agent SQLite database                              | Untouched; sessions continue from the stored transcript                   |
-| Accepted Control UI follow-ups | Per-agent SQLite pending inputs and browser outbox     | Matching interrupted inputs are re-admitted when the browser reconnects   |
-| Interrupted main-session turn  | Per-agent SQLite session row and transcript            | Automatically resumed or reconciled a few seconds after startup           |
-| Subagent runs                  | SQLite (shared state database)                         | Interrupted runs settle; the parent decides how to continue               |
-| Queued outbound deliveries     | SQLite delivery queue                                  | Drained after restart; undelivered replies are retried                    |
-| Scheduled (cron) jobs          | SQLite cron store                                      | Schedules persist; the scheduler re-arms on boot                          |
-| Restart continuation           | SQLite restart sentinel                                | One-shot follow-up dispatched to the session that asked for the restart   |
-| Background exec processes      | Process memory; notification obligation in session row | Processes end; eligible owning sessions wake once with an unknown outcome |
-| Gateway terminal PTYs          | Process memory                                         | End with the old process; terminal sessions are not recovered             |
+| State                          | Storage                                                | Behavior across restart                                                             |
+| ------------------------------ | ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Conversation history           | Per-agent SQLite database                              | Untouched; sessions continue from the stored transcript                             |
+| Accepted Control UI follow-ups | Per-agent SQLite pending inputs and browser outbox     | Matching interrupted inputs are re-admitted when the browser reconnects             |
+| Accepted Goal continuations    | Per-agent SQLite pending inputs                        | Re-admitted to the follow-up queue while the same goal and operator remain eligible |
+| Interrupted main-session turn  | Per-agent SQLite session row and transcript            | Automatically resumed or reconciled a few seconds after startup                     |
+| Subagent runs                  | SQLite (shared state database)                         | Interrupted runs settle; the parent decides how to continue                         |
+| Queued outbound deliveries     | SQLite delivery queue                                  | Drained after restart; undelivered replies are retried                              |
+| Scheduled (cron) jobs          | SQLite cron store                                      | Schedules persist; the scheduler re-arms on boot                                    |
+| Restart continuation           | SQLite restart sentinel                                | One-shot follow-up dispatched to the session that asked for the restart             |
+| Background exec processes      | Process memory; notification obligation in session row | Processes end; eligible owning sessions wake once with an unknown outcome           |
+| Gateway terminal PTYs          | Process memory                                         | End with the old process; terminal sessions are not recovered                       |
 
 The Control UI retains accepted text and attachments in its outbox until the
 Gateway confirms transcript consumption. After reconnecting, it checks the saved
@@ -91,6 +92,14 @@ receipt before resubmitting an interrupted input through normal authentication
 and session admission. The old queue and execution authority are never reused.
 This preserves each browser outbox's order without submitting already-consumed
 messages again. Different browsers can reconnect in a different order.
+
+Automatic [Goal continuations](/tools/goal#automatic-continuation) are saved after
+the preceding turn settles successfully. Recovery restores each accepted input
+under current operator permissions and checks its exact goal and session identity.
+Interrupted Goal turns keep that identity through normal main-session recovery.
+Pause, completion, reset, and exhausted budgets prevent further pursuit.
+A saved active goal without an accepted continuation or interrupted run does not
+authorize startup work; a crash before acceptance can still require `/goal resume`.
 
 Requests refused before dispatch and chat sends interrupted while waiting for
 session admission return a retryable `UNAVAILABLE` error with

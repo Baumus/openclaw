@@ -1,3 +1,4 @@
+import type { AdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { getRegisteredAgentHarness } from "../../agents/harness/registry.js";
 import { resolveEffectiveAgentRuntime } from "../../agents/thinking-runtime.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
@@ -36,4 +37,20 @@ export function isWorkerGoalChatAdmission(
     }) === "codex" &&
     getRegisteredAgentHarness("codex")?.harness.cloudPlacement?.mode === "remote-exec",
   );
+}
+
+/** Local and worker Codex Goals need the operator captured by current admission. */
+export function assertGoalAuthority(
+  request: ChatSendAdmissionParams["request"],
+  entry: SessionEntry | undefined,
+  operator: { authority?: AdmittedRunOperatorAuthority },
+  workerGoalAdmission: boolean,
+): void {
+  if (
+    request.goalOperation &&
+    !operator.authority &&
+    (workerGoalAdmission || entry?.agentHarnessId === "codex")
+  ) {
+    throw new Error("Codex Goals require a current authenticated operator request.");
+  }
 }

@@ -13,7 +13,7 @@ title: "Goal"
 
 A **goal** is one durable objective attached to the current OpenClaw session.
 It gives the agent and the operator a shared target for long-running work.
-In built-in chat runs and supported Codex cloud-worker sessions, OpenClaw continues
+In built-in chat runs and supported local or cloud-worker Codex sessions, OpenClaw continues
 pursuing an active goal after a normal turn finishes, even when the model ends with a final reply instead of calling
 another tool. A goal is not a reminder, cron job, or standing order.
 
@@ -182,7 +182,7 @@ so an operator stop remains in effect until the goal is resumed.
 
 ## Automatic continuation
 
-After a built-in chat or auto-reply turn finishes normally, OpenClaw checks the
+After a supported chat or auto-reply turn finishes normally, OpenClaw checks the
 current goal and its token usage. If the same goal is still active, it queues a
 hidden internal nudge: **Advance the active goal; keep it active until fully
 achieved.** Each successfully settled continuation makes the same check; this
@@ -192,7 +192,7 @@ The normal follow-up queue owns these turns. They wait for the previous turn's
 execution and delivery to settle, use normal session admission and permissions,
 and do not appear as new human messages. Queued user input and existing
 child/tool continuations take precedence; the nudge does not run alongside them.
-When a built-in chat Goal yields to children, their settled requester turn
+When a supported chat Goal yields to children, their settled requester turn
 receives the current Goal context. A normal final returns pursuit to the same
 follow-up queue only after the child completion batch is committed; it does not
 make independent command runs autonomous.
@@ -207,13 +207,20 @@ goal remains an explicit operator action, not something the continuation does.
 Each settled automatic Goal turn increments `continuationTurns` once, including
 the turn that completes the Goal. Human Start and Resume turns do not increment it.
 
-Automatic nudges apply to built-in chat/auto-reply execution and supported Codex
-cloud-worker sessions, not other external runtimes, heartbeat turns, or independent
+Automatic nudges apply to built-in chat/auto-reply execution and supported local
+and cloud-worker Codex sessions, not other external runtimes, heartbeat turns, or independent
 scheduled work. They
 use the existing queue and run lifecycle rather than a periodic background
-scanner. A saved active goal alone does not start a new process or create a
-schedule after shutdown; normal session recovery or another admitted turn
-provides the next execution opportunity.
+scanner. After the previous turn settles successfully, an authenticated
+continuation is accepted into the existing durable pending-input store before
+execution. Startup restores that specific input under current operator
+permissions and returns it to the same follow-up queue. Paused, replaced, or
+completed goals cannot authorize replay. Interrupted continuation turns use
+normal session recovery and retain their original goal identity.
+
+A saved active goal alone does not start a process or create a schedule.
+Recovery requires an accepted continuation or interrupted turn; a crash before
+the next input is accepted can still require `/goal resume`.
 
 ## Control UI
 
@@ -235,18 +242,19 @@ Starting a Goal saves the Goal and its user turn together with the operation
 receipt before acknowledging Send. A failed admission leaves the draft intact and
 does not create a Goal. A failed older chat send stays separate from a newly opened
 Goal draft instead of filling its empty objective. Start and Resume require an idle
-built-in local session with recoverable history, or an existing Codex session
+built-in or Codex local session with recoverable history, or an existing Codex session
 assigned to a cloud worker with remote execution. Worker setup must admit the input
 before the runtime commits the Goal and its operation receipt. Other external
 runtimes remain unsupported. Goals are not queued or steered into another run.
 The UI reports unsupported or busy sessions rather than creating an inactive Goal.
 
-Codex worker Goals use the same OpenClaw Goal ID, history, budgets, accounting,
+Codex Goals use the same OpenClaw Goal ID, history, budgets, accounting,
 and continuation queue. Codex's separate autonomous Goal engine stays disabled;
 the core `get_goal`, `create_goal`, and `update_goal` tools remain available when
 native shell tools are enabled, subject to normal tool policy.
-Continuation retains the operator's current authority; it does not replay old
-input or recreate authority after a Gateway restart.
+Continuation retains the operator's current authority. Restart recovery restores
+the captured operator source under current policy; it does not restore old
+approvals or infer authority from an active goal.
 
 The web Control UI shows the goal as a compact pill above the chat composer:
 a status icon, the status label (for example `Pursuing goal`), the truncated

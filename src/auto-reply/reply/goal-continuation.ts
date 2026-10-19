@@ -16,6 +16,9 @@ import {
   type SessionControllerInput,
 } from "../../sessions/session-controller.mailbox.js";
 import { captureSessionTarget } from "../../sessions/session-controller.target.js";
+import { formatSystemTurnPrompt } from "../../sessions/system-turn-prompt.js";
+import { createDeferredCore } from "../../shared/deferred.js";
+import { stageGoalContinuationPendingInput } from "./goal-continuation-pending.js";
 import { createGoalContinuationReturnScope } from "./goal-continuation-return.js";
 import type { GoalContinuation } from "./goal-continuation.types.js";
 import { refreshActiveGoalContext } from "./inbound-meta.js";
@@ -26,19 +29,21 @@ import { buildTranscriptFollowupRun } from "./transcript-followup-run.js";
 
 export type { GoalContinuation } from "./goal-continuation.types.js";
 
-/** Selects supported placement facts; execution still acquires a fresh turn claim. */
-export async function isSupportedWorkerGoalPlacement(params: {
+/** Selects placement facts; execution still acquires a fresh turn claim. */
+export async function resolveCodexGoalPlacement(params: {
   agentId?: string;
   sessionKey: string;
   sessionId: string;
-}): Promise<boolean> {
-  if (getRegisteredAgentHarness("codex")?.harness.cloudPlacement?.mode !== "remote-exec") {
-    return false;
+  requiresWorker?: boolean;
+}): Promise<"local" | "worker" | undefined> {
+  const harness = getRegisteredAgentHarness("codex")?.harness;
+  if (!harness) {
+    return undefined;
   }
   const service = getInProcessGatewayRequestContext()?.workerSessionPlacementService;
   const prepared = await service?.prepareSessionPlacement?.(params.sessionId);
   if (!prepared) {
-    return false;
+    return params.requiresWorker ? undefined : "local";
   }
   try {
     const pending = prepared.prepareRead();
@@ -46,16 +51,31 @@ export async function isSupportedWorkerGoalPlacement(params: {
       await pending;
     }
     const placement = prepared.current();
-    return Boolean(
-      placement &&
-      placement.executionMode === "remote-exec" &&
-      placement.state !== "local" &&
-      placement.agentId === params.agentId &&
-      placement.sessionKey === params.sessionKey,
-    );
+    if (!placement) {
+      return params.requiresWorker ? undefined : "local";
+    }
+    if (
+      placement.agentId !== params.agentId ||
+      placement.sessionKey !== params.sessionKey ||
+      placement.sessionId !== params.sessionId
+    ) {
+      return undefined;
+    }
+    if (placement.state === "local") {
+      return params.requiresWorker ? undefined : "local";
+    }
+    return placement.executionMode === "remote-exec" &&
+      harness.cloudPlacement?.mode === "remote-exec"
+      ? "worker"
+      : undefined;
   } finally {
     prepared.release();
   }
+}
+
+/** Host Goal state and fresh attempts are supported by these bundled runtimes. */
+export function isSupportedGoalHarness(harnessId: string | undefined): boolean {
+  return harnessId === undefined || harnessId === "openclaw" || harnessId === "codex";
 }
 
 export function isGoalContinuationCurrent(
@@ -70,13 +90,11 @@ export function isGoalContinuationCurrent(
     goal?.id === continuation.goalId &&
     goal.status === "active" &&
     !entry.abortedLastRun &&
-    (entry.agentHarnessId === undefined ||
-      entry.agentHarnessId === "openclaw" ||
-      (entry.agentHarnessId === "codex" && continuation.workerGoal === true)),
+    isSupportedGoalHarness(entry.agentHarnessId),
   );
 }
 
-function isGoalContinuationOutcome(result: EmbeddedAgentRunResult): boolean {
+export function isGoalContinuationOutcome(result: EmbeddedAgentRunResult): boolean {
   const meta = result.meta;
   return (
     (meta.stopReason === "end_turn" || meta.stopReason === "stop") &&
@@ -91,6 +109,10 @@ function isGoalContinuationOutcome(result: EmbeddedAgentRunResult): boolean {
     !result.payloads?.some((payload) => payload.isError)
   );
 }
+
+export const GOAL_CONTINUATION_PROMPT = formatSystemTurnPrompt(
+  "Advance the active goal; keep it active until fully achieved. Use the current goal context, and verify the entire objective before marking it complete.",
+);
 
 /** Queue custody, not a second scheduler, owns every automatic Goal turn. */
 type GoalContinuationParams = {
@@ -140,14 +162,18 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
   if (!eligible() || !entry?.goal) {
     return false;
   }
-  const workerGoal =
-    entry.agentHarnessId === "codex" &&
-    Boolean(params.base.operatorAuthority) &&
-    (await isSupportedWorkerGoalPlacement({
-      agentId: params.base.run.agentId,
-      sessionKey: params.sessionKey,
-      sessionId: params.expectedSession.sessionId,
-    }));
+  const codexPlacement =
+    entry.agentHarnessId === "codex" && params.base.operatorAuthority
+      ? await resolveCodexGoalPlacement({
+          agentId: params.base.run.agentId,
+          sessionKey: params.sessionKey,
+          sessionId: params.expectedSession.sessionId,
+          requiresWorker: Boolean(params.base.run.config?.cloudWorkers?.requiredProfile),
+        })
+      : undefined;
+  if (entry.agentHarnessId === "codex" && !codexPlacement) {
+    return false;
+  }
   params.base.operatorAuthority?.assertCurrent();
   if (!eligible()) {
     return false;
@@ -155,7 +181,7 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
   const continuation: GoalContinuation = {
     ...params.expectedSession,
     goalId: params.initialGoalId ?? entry.goal.id,
-    ...(workerGoal ? { workerGoal: true as const } : {}),
+    ...(codexPlacement === "worker" ? { workerGoal: true as const } : {}),
   };
   if (!isGoalContinuationCurrent(continuation, entry)) {
     return false;
@@ -166,15 +192,18 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
   }
   const base = params.base;
   const cancellation = new AbortController();
+  const ready = createDeferredCore<FollowupRun["userTurnTranscriptRecorder"]>();
+  // Admission observes failures; a cancelled queue may never await its promise.
+  void ready.promise.catch(() => {});
   const nudge: FollowupRun = {
     ...buildTranscriptFollowupRun(base, {
-      prompt:
-        "Advance the active goal; keep it active until fully achieved. Use the current goal context, and verify the entire objective before marking it complete.",
+      prompt: GOAL_CONTINUATION_PROMPT,
       sourceTool: "session_goal_continue",
       expiredSkillAuthoringMessage:
         "Skill authoring requires a fresh user request after the previous turn settled.",
     }),
     goalContinuation: continuation,
+    goalContinuationReady: ready.promise,
     summaryLine: "goal-continuation",
     messageId: ["goal", continuation.sessionId, continuation.goalId, params.sourceRunId].join(":"),
     abortSignal: base.abortSignal
@@ -202,7 +231,53 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
     runAfterReplyOperationClear(params.operation, () => {
       if (params.operation.result?.kind !== "completed") {
         cancellation.abort();
+        ready.resolve(undefined);
+        return;
       }
+      // Persist only after successful source settlement; admission waits for acceptance.
+      void (async () => {
+        const current = await readSessionEntryReadOnlyInWorker({
+          storePath: params.storePath,
+          sessionKey: params.sessionKey,
+        });
+        if (!current) {
+          throw new Error("Goal session disappeared before durable acceptance.");
+        }
+        const assertCurrent = () => {
+          params.base.operatorAuthority?.assertCurrent();
+          if (isFollowupRunAborted(nudge) || !isGoalContinuationCurrent(continuation, current)) {
+            throw new Error("Goal continuation was cancelled before durable acceptance.");
+          }
+        };
+        assertCurrent();
+        await stageGoalContinuationPendingInput({
+          nudge,
+          entry: current,
+          sessionKey: params.sessionKey,
+          storePath: params.storePath,
+          assertCurrent,
+        });
+        // Staging awaits storage; its captured entry is no longer current proof.
+        const acceptedEntry = await readSessionEntryReadOnlyInWorker({
+          storePath: params.storePath,
+          sessionKey: params.sessionKey,
+        });
+        if (!isGoalContinuationCurrent(continuation, acceptedEntry)) {
+          cancellation.abort();
+        }
+        if (isFollowupRunAborted(nudge)) {
+          await nudge.turnAdoptionLifecycle?.onAbandoned?.();
+        }
+        return nudge.userTurnTranscriptRecorder;
+      })().then(ready.resolve, async (error: unknown) => {
+        try {
+          await nudge.turnAdoptionLifecycle?.onAbandoned?.();
+        } catch (cleanupError) {
+          ready.reject(cleanupError);
+          return;
+        }
+        ready.reject(error);
+      });
     });
   }
   return enqueued;

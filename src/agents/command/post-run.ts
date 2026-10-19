@@ -137,6 +137,11 @@ export async function finalizeEmbeddedAgentCommand(params: {
     lifecycleGeneration,
   } = params.attempt;
   const { skillsSnapshot, runContext } = params.embeddedSessionState;
+  const assertRunSourceCurrent = () => {
+    assertSourceCurrent?.();
+    operatorAuthority?.assertCurrent();
+    assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
+  };
   const interruptedForRestart = () =>
     inspectMainSessionRecoveryLifecycleEvent({
       currentLifecycleGeneration: lifecycleGeneration,
@@ -146,6 +151,7 @@ export async function finalizeEmbeddedAgentCommand(params: {
   const effectiveCwd = cwd ?? workspaceDir;
   const isHeartbeatLifecycleRun = isHeartbeatLifecycleRunKind(params.opts.bootstrapContextRunKind);
   let sessionEntry = params.sessionEntry;
+  let recoveredGoalContinuation = sessionEntry?.restartRecoveryGoalContinuation;
   // Return the same producer-owned facts published to agent.wait. Payloads and
   // display history cannot reconstruct a yielded or intentionally empty result.
   const { terminalReply, terminalReceipt } = terminal.metadata;
@@ -301,11 +307,7 @@ export async function finalizeEmbeddedAgentCommand(params: {
     const pendingFinalDeliveryMarker = await persistPendingFinalDeliveryMarker({
       admittedRecoverySource: params.admittedRecoverySource,
       compactionTransitions: compactionFact?.admissionTransitions,
-      assertCurrent: () => {
-        assertSourceCurrent?.();
-        operatorAuthority?.assertCurrent();
-        assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
-      },
+      assertCurrent: assertRunSourceCurrent,
       commandOwnerReference: params.opts.assertSourceCurrent?.recoveryReference,
       agentId: sessionAgentId,
       deliver: params.opts.deliver === true,
@@ -325,12 +327,7 @@ export async function finalizeEmbeddedAgentCommand(params: {
     const resolveFreshSessionEntryForDelivery =
       sessionStore && sessionKey && !params.suppressVisibleSessionEffects
         ? async (): Promise<SessionEntry | undefined> => {
-            const assertCurrent = () => {
-              assertSourceCurrent?.();
-              operatorAuthority?.assertCurrent();
-              assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
-            };
-            assertCurrent();
+            assertRunSourceCurrent();
             const freshEntry = sessionSource
               ? readCapturedSessionActorEntry(sessionSource, normalizeStoreSessionKey(sessionKey))
               : await readSessionEntryReadOnlyInWorker(
@@ -341,7 +338,7 @@ export async function finalizeEmbeddedAgentCommand(params: {
                     readConsistency: "latest",
                     clone: false,
                   },
-                  assertCurrent,
+                  assertRunSourceCurrent,
                 );
             if (
               !freshEntry ||
@@ -416,9 +413,7 @@ export async function finalizeEmbeddedAgentCommand(params: {
       let maintenanceLifecycleRevision = sessionEntry?.lifecycleRevision;
       const authorize = () => {
         throwAgentRunRestartAbortReason(params.opts.abortSignal?.reason);
-        assertSourceCurrent?.();
-        operatorAuthority?.assertCurrent();
-        assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
+        assertRunSourceCurrent();
         return (
           maintenance.remainingMs() > 0 && !maintenance.signal.aborted && !sessionReboundDuringRun
         );
@@ -595,6 +590,8 @@ export async function finalizeEmbeddedAgentCommand(params: {
       const recoveryClaimEntry = [entry, sessionEntry, params.sessionEntry].find(
         (candidate) => candidate?.restartRecoveryDeliveryRunId === runId,
       );
+      recoveredGoalContinuation =
+        recoveryClaimEntry?.restartRecoveryGoalContinuation ?? recoveredGoalContinuation;
       const clearsRecoveryCycle = entry.restartRecoveryDeliveryRunId === runId;
       if (clearOwnedPendingFinal || clearStaleTransportOnly || recoveryClaimEntry) {
         const now = Date.now();
@@ -604,6 +601,15 @@ export async function finalizeEmbeddedAgentCommand(params: {
           sessionKey,
           storePath,
           initialEntry: entry,
+          reducers:
+            clearsRecoveryCycle && recoveryClaimEntry?.restartRecoveryGoalContinuation
+              ? [
+                  {
+                    kind: "goal-continuation",
+                    goalId: recoveryClaimEntry.restartRecoveryGoalContinuation.goalId,
+                  },
+                ]
+              : undefined,
           entry: {
             ...(clearOwnedPendingFinal || clearStaleTransportOnly
               ? clearPendingFinalDelivery(entry, now)
@@ -678,23 +684,35 @@ export async function finalizeEmbeddedAgentCommand(params: {
         }),
       )
     : terminal.outcome;
+  const succeeded =
+    !hasResultError &&
+    classifyAgentRunTerminalOutcome(outcome) === "success" &&
+    (params.opts.deliver !== true || deliveryResult?.deliverySucceeded === true);
   recordGoalContinuationSettlement({
     runId,
     sessionKey,
     result,
     succeeded:
-      result.meta.agentMeta?.agentHarnessId === OPENCLAW_AGENT_RUNTIME_ID &&
-      !hasResultError &&
-      classifyAgentRunTerminalOutcome(outcome) === "success" &&
-      (params.opts.deliver !== true || deliveryResult?.deliverySucceeded === true),
+      (result.meta.agentMeta?.agentHarnessId === OPENCLAW_AGENT_RUNTIME_ID ||
+        result.meta.agentMeta?.agentHarnessId === "codex") &&
+      succeeded,
   });
+  if (recoveredGoalContinuation) {
+    const { resumeCompletedGoalContinuation } =
+      await import("../../gateway/goal-continuation-recovery.js");
+    await resumeCompletedGoalContinuation({
+      continuation: recoveredGoalContinuation,
+      entry: sessionEntry,
+      source: params.prepared,
+      options: params.opts,
+      result,
+      succeeded,
+      deliveryContext: params.currentRunDeliveryContext,
+      lifecycleGeneration,
+    });
+  }
   return {
-    maintenance:
-      classifyAgentRunTerminalOutcome(outcome) === "success" &&
-      !hasResultError &&
-      (params.opts.deliver !== true || deliveryResult?.deliverySucceeded === true)
-        ? maintenanceRequest
-        : undefined,
+    maintenance: succeeded ? maintenanceRequest : undefined,
     deliveryResult: recordAgentRunTerminalOutcome(
       deliveryResult,
       hasResultError || classifyAgentRunTerminalOutcome(outcome) !== "success"

@@ -15,6 +15,7 @@ export function buildTranscriptFollowupRun(
     enqueuedAt: Date.now(),
     transcriptPrompt: undefined,
     userTurnTranscriptRecorder: undefined,
+    goalContinuationReady: undefined,
     sourceTurnId: undefined,
     currentInboundContext: undefined,
     images: undefined,

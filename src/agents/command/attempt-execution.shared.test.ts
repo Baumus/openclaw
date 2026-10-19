@@ -37,6 +37,40 @@ function fixture(initialEntry: SessionEntry = { sessionId: "session-1", updatedA
 }
 
 describe("persistAgentSession", () => {
+  it("counts a recovered Goal turn once against fresh state while retiring its exact claim", async () => {
+    const initialEntry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      restartRecoveryDeliveryRunId: "recovery-run",
+      goal: {
+        schemaVersion: 1,
+        id: "goal-1",
+        objective: "Finish the checklist",
+        status: "active",
+        createdAt: 1,
+        updatedAt: 1,
+        tokenStart: 0,
+        tokensUsed: 0,
+        continuationTurns: 2,
+      },
+    };
+    const { seed, read, write } = fixture(initialEntry);
+    await seed({
+      ...initialEntry,
+      goal: { ...initialEntry.goal!, status: "paused", continuationTurns: 3 },
+    });
+    const finish = () =>
+      write({
+        entry: { ...initialEntry, restartRecoveryDeliveryRunId: undefined },
+        shouldPersist: (current) => current?.restartRecoveryDeliveryRunId === "recovery-run",
+        reducers: [{ kind: "goal-continuation", goalId: "goal-1" }],
+      });
+    await finish();
+    await finish();
+    expect(read()?.goal).toMatchObject({ status: "paused", continuationTurns: 4 });
+    expect(read()?.restartRecoveryDeliveryRunId).toBeUndefined();
+  });
+
   it.each([false, true])(
     "stamps required creation only for a new authoritative row (existing=%s)",
     async (existing) => {

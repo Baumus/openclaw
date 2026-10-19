@@ -77,20 +77,26 @@ function readPendingInputPageInDatabase(
           .where("session_key", "=", query.sessionKey)
           .where("session_id", "=", query.sessionId)
           .$if(hasConsumption, (selection) => selection.where("consumed_event_id", "is", null))
-          .$if(query.sessionSendRecovery === true, (selection) =>
-            selection
-              .where("state", "in", ["queued", "interrupted"])
-              .where((eb) =>
-                eb(
-                  jsonPathValue(
-                    database.db,
-                    eb.ref("message_json"),
-                    eb.val("$.__openclaw.sessionSendDelivery"),
+          .$if(
+            query.sessionSendRecovery === true || query.goalContinuationRecovery === true,
+            (selection) =>
+              selection
+                .where("state", "in", ["queued", "interrupted"])
+                .where((eb) =>
+                  eb(
+                    jsonPathValue(
+                      database.db,
+                      eb.ref("message_json"),
+                      eb.val(
+                        query.goalContinuationRecovery
+                          ? "$.__openclaw.goalContinuation"
+                          : "$.__openclaw.sessionSendDelivery",
+                      ),
+                    ),
+                    "is not",
+                    null,
                   ),
-                  "is not",
-                  null,
                 ),
-              ),
           )
           .$if(query.before !== undefined, (selection) =>
             selection.where("seq", "<", query.before!),

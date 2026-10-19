@@ -260,6 +260,23 @@ export async function readSessionSendRecoveryPage(
   };
 }
 
+/** Discover only admitted Goal inputs; active goal state alone never authorizes a restart. */
+export async function readGoalContinuationRecoveryPage(
+  scope: Scope,
+  options: { before?: number } = {},
+): Promise<Omit<SessionPendingInputPage, "total">> {
+  const { rows, nextBefore } = await readPendingInputRows(scope, {
+    ...options,
+    limit: 20,
+    includeTotal: false,
+    goalContinuationRecovery: true,
+  });
+  return {
+    items: rows.toReversed().map(projectSessionPendingInput),
+    ...(nextBefore !== undefined ? { nextBefore } : {}),
+  };
+}
+
 /** Prompt context needs only the bounded page, never the full retained-input count. */
 export async function readSessionPendingInputContext(
   scope: Scope,

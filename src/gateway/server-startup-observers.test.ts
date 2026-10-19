@@ -8,6 +8,7 @@ import { runGatewayStartupObservers } from "./server-startup-observers.js";
 const mocks = vi.hoisted(() => ({
   prewarm: vi.fn(async () => {}),
   delivery: vi.fn(async () => {}),
+  goal: vi.fn(async () => {}),
   exec: vi.fn(async () => {}),
 }));
 
@@ -18,6 +19,10 @@ vi.mock("./server-history-prewarm.js", () => ({
 // mock-isolation: Hold delivery recovery without reading persisted channel deliveries.
 vi.mock("./session-send-recovery.js", () => ({
   recoverSessionSendDeliveries: mocks.delivery,
+}));
+// mock-isolation: Goal input replay has independent storage tests; observe startup ordering here.
+vi.mock("./goal-continuation-recovery.js", () => ({
+  recoverGoalContinuations: mocks.goal,
 }));
 // mock-isolation: Hold exec notification recovery without dispatching persisted notifications.
 vi.mock("../agents/bash-tools.exec-notify.js", () => ({
@@ -39,7 +44,7 @@ beforeEach(() => {
 });
 afterEach(() => resetGatewayWorkAdmission());
 
-it.for(["prewarm", "delivery", "exec"] as const)(
+it.for(["prewarm", "delivery", "exec", "goal"] as const)(
   "activates healthy subagents while %s waits for another agent database",
   async (blocked, { signal }) => {
     const prepared = createDeferred();
@@ -79,10 +84,14 @@ it.for(["prewarm", "delivery", "exec"] as const)(
       if (blocked !== "prewarm") {
         await withinTest(entered.promise, signal);
         expect(settled).toBe(false);
+        if (blocked === "delivery") {
+          expect(mocks.goal).not.toHaveBeenCalled();
+        }
       }
       prepared.resolve();
       await observers;
       expect(log.warn).not.toHaveBeenCalled();
+      expect(mocks.goal).toHaveBeenCalledOnce();
     } finally {
       controller.abort();
       prepared.resolve();
@@ -90,3 +99,26 @@ it.for(["prewarm", "delivery", "exec"] as const)(
     }
   },
 );
+
+it("recovers accepted Goals after the session-delivery owner reports a failure", async () => {
+  mocks.delivery.mockRejectedValue(new Error("saved peer delivery failed"));
+  const context = createContext();
+  const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  await runGatewayStartupObservers({
+    registry: createEmptyPluginRegistry(),
+    resolveGatewayContext: () => context,
+    loadSubagentRegistryActivation: () => async () => {},
+    createHookRunner: async (...args) =>
+      (await import("../plugins/hooks.js")).createHookRunner(...args),
+    refreshLatestUpdateRestartSentinel: async () => {},
+    signal: new AbortController().signal,
+    port: 0,
+    config: {},
+    workspaceDir: "/unused",
+    getCron: () => undefined,
+    log,
+    logHooks: log,
+  });
+  expect(log.warn).toHaveBeenCalledOnce();
+  expect(mocks.goal).toHaveBeenCalledOnce();
+});

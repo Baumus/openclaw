@@ -138,6 +138,8 @@ export type FollowupRunPayload = {
   disableCollectBatching?: boolean;
   /** Internal Goal nudge; admission must still observe this exact active Goal. */
   goalContinuation?: GoalContinuation;
+  /** Source completion must precede durable Goal acceptance and turn admission. */
+  goalContinuationReady?: Promise<UserTurnTranscriptRecorder | undefined>;
   /** Internal marker for the one-shot stranded final recovery retry. */
   strandedReplyRetry?: boolean;
   /** This continuation owes last-resort feedback if it also stalls, including claimed input. */

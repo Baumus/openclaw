@@ -28,7 +28,11 @@ import { createCompactionNoticePayload } from "./compaction-notice.js";
 import { deliverFollowupDecision, resolveFollowupDeliveryDecision } from "./followup-delivery.js";
 import { settleQueuedFollowupPresentation } from "./followup-presentation.js";
 import { executeFollowupTurn } from "./followup-turn-execution.js";
-import { enqueueGoalContinuation, createGoalContinuationReturn } from "./goal-continuation.js";
+import {
+  enqueueGoalContinuation,
+  createGoalContinuationReturn,
+  isSupportedGoalHarness,
+} from "./goal-continuation.js";
 import { completeFollowupRunLifecycle, type FollowupRun } from "./queue.js";
 import { resolveQueueSettings } from "./queue/settings-runtime.js";
 import { isFollowupRunAborted, type QueuedFollowupReplyBatch } from "./queue/types.js";
@@ -230,8 +234,7 @@ export function createFollowupRunner(
         turn.session.kind === "session" &&
           turn.session.storePath &&
           initialGoalId &&
-          (turn.session.current()?.agentHarnessId === undefined ||
-            turn.session.current()?.agentHarnessId === "openclaw")
+          isSupportedGoalHarness(turn.session.current()?.agentHarnessId)
           ? {
               base: turn.queued,
               initialGoalId,

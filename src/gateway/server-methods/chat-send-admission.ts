@@ -52,7 +52,7 @@ import {
 } from "./chat-send-admission-cleanup.js";
 import { prepareChatSendAdmissionContext } from "./chat-send-admission-context.js";
 import { respondChatSessionRoutingChanged } from "./chat-send-admission-errors.js";
-import { isWorkerGoalChatAdmission } from "./chat-send-goal-admission.js";
+import { assertGoalAuthority, isWorkerGoalChatAdmission } from "./chat-send-goal-admission.js";
 import { prepareGoalChatSendRetry } from "./chat-send-goal-retry.js";
 import { prepareChatSendInterruptAdmission } from "./chat-send-interrupt-admission.js";
 import {
@@ -399,7 +399,7 @@ export async function admitChatSend(params: ChatSendAdmissionParams) {
         workerGoalAdmission = isWorkerGoalChatAdmission(params, latestSession, placement, acpMeta);
         if (request.goalOperation && !restartSafeAdmission && !workerGoalAdmission) {
           throw new Error(
-            "Goal start or resume requires an idle built-in local session with recoverable history or a supported Codex cloud-worker session.",
+            "Goal start or resume requires an idle OpenClaw or Codex local session with recoverable history or a supported Codex cloud-worker session.",
           );
         }
         if (retryableClaim && !restartSafeAdmission) {
@@ -476,9 +476,7 @@ export async function admitChatSend(params: ChatSendAdmissionParams) {
         }
       },
     });
-    if (workerGoalAdmission && !capturedOperator.authority) {
-      throw new Error("Worker Goals require a current authenticated operator request.");
-    }
+    assertGoalAuthority(request, admittedSessionEntry, capturedOperator, workerGoalAdmission);
     admittedRunAbort.initializeTiming({ now: Date.now(), timeoutMs });
     workPhase?.finish();
     if (

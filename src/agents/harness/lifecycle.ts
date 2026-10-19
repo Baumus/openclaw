@@ -1,3 +1,4 @@
+import { readGoalContinuationContext } from "../../auto-reply/reply/goal-continuation-return.js";
 import { getRuntimeConfigSnapshot } from "../../config/config.js";
 import { assertContextEngineHostSupport } from "../../context-engine/host-compat.js";
 import {
@@ -368,18 +369,24 @@ export async function runAgentHarnessLifecycleAttempt(
   let result: EmbeddedRunAttemptResult;
   const diagnostics = createAgentHarnessLifecycleDiagnostics(harness, params);
   try {
-    assertAgentHarnessContextEngineSupport(harness, params);
+    const currentInboundContext = readGoalContinuationContext({
+      runId: params.runId,
+      sessionKey: params.sessionKey,
+      currentInboundContext: params.currentInboundContext,
+    });
+    const attemptParams = currentInboundContext ? { ...params, currentInboundContext } : params;
+    assertAgentHarnessContextEngineSupport(harness, attemptParams);
     diagnostics.startAgentRun();
     const runAndClassify = async () => {
       diagnostics.setPhase("send");
-      const rawResult = await execute(params);
+      const rawResult = await execute(attemptParams);
       diagnostics.setPhase("resolve");
       // Classification happens inside the diagnostic phase so failures identify
       // whether they came from send or result resolution.
       return copyCoreTtsAttemptResultProvenance(
         rawResult,
         normalizeAgentHarnessAttemptResult(
-          applyAgentHarnessResultClassification(harness, rawResult, params),
+          applyAgentHarnessResultClassification(harness, rawResult, attemptParams),
         ),
       );
     };

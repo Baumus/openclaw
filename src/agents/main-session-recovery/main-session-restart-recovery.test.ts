@@ -537,6 +537,48 @@ function getHarnessRecoveryFixture() {
 }
 
 describe("main-session-restart-recovery", () => {
+  it.each([
+    "active",
+    "paused",
+    "complete",
+    "budget_limited",
+    "replaced",
+    "lifecycle-replaced",
+  ] as const)(
+    "respects %s goal state when recovering an interrupted continuation",
+    async (state) => {
+      const status = state === "replaced" || state === "lifecycle-replaced" ? "active" : state;
+      const sessionsDir = await makeSessionsDir("main");
+      const sessionKey = "agent:main:dashboard:goal-recovery";
+      const sessionId = "goal-recovery";
+      await writeStore(sessionsDir, {
+        [sessionKey]: mainSessionEntry({
+          sessionId,
+          restartRecoveryGoalContinuation: { sessionId, goalId: "goal-1" },
+          ...(state === "lifecycle-replaced" ? { lifecycleRevision: "new-revision" } : {}),
+          goal: {
+            schemaVersion: 1,
+            id: state === "replaced" ? "goal-2" : "goal-1",
+            objective: "Finish the checklist",
+            status,
+            tokenStart: 0,
+            tokensUsed: 0,
+            continuationTurns: 0,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        }),
+      });
+      await writeTranscript(sessionsDir, sessionId, [makeUserMessage("Continue the goal")]);
+      await recoverRestartAbortedMainSessions({ cfg: { agents: { entries: { main: {} } } } });
+      if (state === "active") {
+        expect(callGateway).toHaveBeenCalled();
+      } else {
+        expect(callGateway).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it.for(["finish", "stop"] as const)(
     "starts recovery in interruption order across stores and preserves waiting work on %s",
     async (outcome, { signal }) => {

@@ -261,6 +261,7 @@ export function buildCurrentRunRestartRecoveryClaim(params: {
   | "restartRecoveryDeliveryRunId"
   | "restartRecoveryDeliverySourceRunId"
   | "restartRecoveryHarnessCompletion"
+  | "restartRecoveryGoalContinuation"
   | "restartRecoveryForceSafeTools"
   | "restartRecoveryOperatorSource"
   | "restartRecoveryRequesterSource"
@@ -281,6 +282,7 @@ export function buildCurrentRunRestartRecoveryClaim(params: {
       ...(entry.restartRecoveryHarnessCompletion
         ? { restartRecoveryHarnessCompletion: entry.restartRecoveryHarnessCompletion }
         : {}),
+      restartRecoveryGoalContinuation: entry.restartRecoveryGoalContinuation,
       restartRecoveryDeliveryContext: entry.restartRecoveryDeliveryContext,
       restartRecoveryDeliveryMediaUrls: entry.restartRecoveryDeliveryMediaUrls,
       restartRecoveryDisableMessageTool: entry.restartRecoveryDisableMessageTool,
@@ -304,6 +306,7 @@ export function buildCurrentRunRestartRecoveryClaim(params: {
       : params.entry.restartRecoveryHarnessCompletion
         ? { restartRecoveryHarnessCompletion: undefined }
         : {}),
+    restartRecoveryGoalContinuation: undefined,
     restartRecoveryDeliveryContext: params.deliveryContext,
     restartRecoveryDeliveryMediaUrls: undefined,
     restartRecoveryDisableMessageTool:

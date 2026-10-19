@@ -437,6 +437,19 @@ export function normalizeRestartRecoveryEntryFields(
     value: SessionEntry[K] | undefined,
   ) => void,
 ): void {
+  const continuation: unknown = entry.restartRecoveryGoalContinuation;
+  const normalizedContinuation =
+    isRecord(continuation) &&
+    typeof continuation.sessionId === "string" &&
+    continuation.sessionId.length > 0 &&
+    typeof continuation.goalId === "string" &&
+    continuation.goalId.length > 0 &&
+    (continuation.lifecycleRevision === undefined ||
+      typeof continuation.lifecycleRevision === "string") &&
+    (continuation.workerGoal === undefined || continuation.workerGoal === true)
+      ? entry.restartRecoveryGoalContinuation
+      : undefined;
+  assign("restartRecoveryGoalContinuation", normalizedContinuation);
   const harnessCompletion = normalizeHarnessCompletionRecovery(
     entry.restartRecoveryHarnessCompletion,
   );
@@ -685,6 +698,7 @@ export function buildRestartRecoveryClaimCleanupPatch(params: {
     restartRecoveryOperatorSource: undefined,
     restartRecoveryRequesterSource: undefined,
     restartRecoveryHarnessCompletion: undefined,
+    restartRecoveryGoalContinuation: undefined,
     restartRecoveryRequesterAccountId: undefined,
     restartRecoveryRequesterSenderId: undefined,
     restartRecoverySameChannelThreadRequired: undefined,

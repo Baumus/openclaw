@@ -12,6 +12,25 @@ import {
   type InternalSessionEntry as SessionEntry,
 } from "../../config/sessions/types.js";
 
+/** A fresh accepted UI input may replace only an interrupted, undelivered UI claim. */
+export function canTransferControlUiRecoveryClaim(
+  entry: SessionEntry,
+  admissionRunId: string | undefined,
+  activeClaimRunId: string | undefined,
+): boolean {
+  return Boolean(
+    admissionRunId &&
+    activeClaimRunId &&
+    admissionRunId !== activeClaimRunId &&
+    entry.abortedLastRun === true &&
+    (entry.status === undefined || entry.status === "interrupted") &&
+    entry.pendingFinalDelivery === undefined &&
+    entry.restartRecoveryBeforeAgentReplyState === undefined &&
+    entry.restartRecoveryDeliveryReceiptState === undefined &&
+    entry.restartRecoverySourceIngress === "control-ui",
+  );
+}
+
 /** Provider redelivery guard shared by ingress and the agent admission boundary. */
 export function isDuplicateRestartRecoverySource(
   entry: SessionEntry | null | undefined,

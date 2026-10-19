@@ -19,7 +19,7 @@ import { accountAgentTurnCompaction } from "./agent-runner-result-accounting.js"
 import { finalizeReplyAgentRun } from "./agent-runner-result.js";
 import type { FinalizeReplyAgentRunInput } from "./agent-runner-result.types.js";
 import { createFollowupRunner } from "./followup-runner.js";
-import { createGoalContinuationReturn } from "./goal-continuation.js";
+import { createGoalContinuationReturn, isSupportedGoalHarness } from "./goal-continuation.js";
 import {
   buildRecoverablePendingFinalDeliveryText,
   normalizePendingFinalDeliveryPayloads,
@@ -222,8 +222,7 @@ async function executePreparedReplyAgentRunWithCompletion(
       sessionKey &&
       storePath &&
       activeSessionEntry?.goal?.status === "active" &&
-      (activeSessionEntry.agentHarnessId === undefined ||
-        activeSessionEntry.agentHarnessId === "openclaw")
+      isSupportedGoalHarness(activeSessionEntry.agentHarnessId)
       ? {
           base: followupRun,
           initialGoalId: activeSessionEntry.goal.id,

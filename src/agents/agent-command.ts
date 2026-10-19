@@ -10,6 +10,7 @@ import {
 } from "../infra/agent-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { getInProcessGatewayRequestContext } from "../plugins/runtime/gateway-request-scope.js";
 import { withPluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv, withoutRuntimeOutput } from "../runtime.js";
@@ -460,64 +461,99 @@ async function agentCommandInternalOwned(
         runOwnedSessionId = attemptPrepared.sessionId;
         recordCompactionSessionId(runOwnedSessionId);
       }
-      const embeddedAttempt = await runEmbeddedAgentAttempt({
-        prepared: attemptPrepared,
-        opts,
-        sessionEntry,
-        lifecycleGeneration,
-        onLifecycleGenerationChanged: (nextLifecycleGeneration) => {
-          lifecycleGeneration = nextLifecycleGeneration;
-        },
-        onCompactionAccounting: (fact) => {
-          if (fact.kind === "durable") {
-            runOwnedSessionId = fact.target.sessionId;
-            if (fact.previousSessionId !== undefined) {
-              recordCompactionSessionId(fact.target.sessionId);
-            }
-          }
-        },
-        suppressVisibleSessionEffects,
-        preserveUserFacingSessionModelState,
-        modelSelection,
-        embeddedSessionState,
-        trackInternalModelRunTarget,
-        preparedRunAdmission,
-      });
-      if (embeddedAttempt.fallbackExhausted) {
-        opts.onModelFallbackExhausted?.();
+      let runWithGoalReturn = <T>(run: () => T): T => run();
+      const gatewayContext = getInProcessGatewayRequestContext();
+      if (
+        sessionEntry?.restartRecoveryGoalContinuation &&
+        sessionKey &&
+        storePath &&
+        turnOwner &&
+        opts.operatorAuthority &&
+        gatewayContext
+      ) {
+        const { createRecoveredGoalCommandReturn } =
+          await import("../gateway/goal-continuation-recovery.js");
+        runWithGoalReturn = createRecoveredGoalCommandReturn({
+          context: gatewayContext,
+          entry: sessionEntry,
+          sessionKey,
+          storePath,
+          runId,
+          agentId: sessionAgentId,
+          operation: turnOwner,
+          operatorAuthority: opts.operatorAuthority,
+          signal: opts.abortSignal,
+          ...(currentRunDeliveryContext?.channel && currentRunDeliveryContext.to
+            ? {
+                delivery: {
+                  ...currentRunDeliveryContext,
+                  channel: currentRunDeliveryContext.channel,
+                  to: currentRunDeliveryContext.to,
+                },
+              }
+            : {}),
+        });
       }
-      sessionEntry = embeddedAttempt.sessionEntry;
-      lifecycleGeneration = embeddedAttempt.lifecycleGeneration;
-      const finalized = await finalizeEmbeddedAgentCommand({
-        admittedRecoverySource: preparedRunAdmission.pendingFinalRecoverySource,
-        prepared: attemptPrepared,
-        opts,
-        deps: resolvedDeps,
-        runtime,
-        sessionEntry,
-        attempt: embeddedAttempt,
-        embeddedSessionState,
-        suppressVisibleSessionEffects,
-        preserveUserFacingSessionModelState,
-        currentRunDeliveryContext,
-        sessionOwnership: { runOwnedSessionId, sessionReboundDuringRun },
-        trackInternalModelRunTarget,
-        onSessionOwnershipChanged: (ownership, committedCompactionSessionId) => {
-          runOwnedSessionId = ownership.runOwnedSessionId;
-          sessionReboundDuringRun = ownership.sessionReboundDuringRun;
-          if (committedCompactionSessionId) {
-            recordCompactionSessionId(committedCompactionSessionId);
-          }
-        },
-        onTerminalDeliveryEvidenceChanged: (evidence) => {
-          restartRecoveryTerminalDeliveryEvidence = evidence;
-        },
+      return await runWithGoalReturn(async () => {
+        const embeddedAttempt = await runEmbeddedAgentAttempt({
+          prepared: attemptPrepared,
+          opts,
+          sessionEntry,
+          lifecycleGeneration,
+          onLifecycleGenerationChanged: (nextLifecycleGeneration) => {
+            lifecycleGeneration = nextLifecycleGeneration;
+          },
+          onCompactionAccounting: (fact) => {
+            if (fact.kind === "durable") {
+              runOwnedSessionId = fact.target.sessionId;
+              if (fact.previousSessionId !== undefined) {
+                recordCompactionSessionId(fact.target.sessionId);
+              }
+            }
+          },
+          suppressVisibleSessionEffects,
+          preserveUserFacingSessionModelState,
+          modelSelection,
+          embeddedSessionState,
+          trackInternalModelRunTarget,
+          preparedRunAdmission: admission,
+        });
+        if (embeddedAttempt.fallbackExhausted) {
+          opts.onModelFallbackExhausted?.();
+        }
+        sessionEntry = embeddedAttempt.sessionEntry;
+        lifecycleGeneration = embeddedAttempt.lifecycleGeneration;
+        const finalized = await finalizeEmbeddedAgentCommand({
+          admittedRecoverySource: admission.pendingFinalRecoverySource,
+          prepared: attemptPrepared,
+          opts,
+          deps: resolvedDeps,
+          runtime,
+          sessionEntry,
+          attempt: embeddedAttempt,
+          embeddedSessionState,
+          suppressVisibleSessionEffects,
+          preserveUserFacingSessionModelState,
+          currentRunDeliveryContext,
+          sessionOwnership: { runOwnedSessionId, sessionReboundDuringRun },
+          trackInternalModelRunTarget,
+          onSessionOwnershipChanged: (ownership, committedCompactionSessionId) => {
+            runOwnedSessionId = ownership.runOwnedSessionId;
+            sessionReboundDuringRun = ownership.sessionReboundDuringRun;
+            if (committedCompactionSessionId) {
+              recordCompactionSessionId(committedCompactionSessionId);
+            }
+          },
+          onTerminalDeliveryEvidenceChanged: (evidence) => {
+            restartRecoveryTerminalDeliveryEvidence = evidence;
+          },
+        });
+        sessionEntry = finalized.sessionEntry;
+        runOwnedSessionId = finalized.runOwnedSessionId;
+        sessionReboundDuringRun = finalized.sessionReboundDuringRun;
+        maintenanceRequest = finalized.maintenance;
+        return finalized.deliveryResult;
       });
-      sessionEntry = finalized.sessionEntry;
-      runOwnedSessionId = finalized.runOwnedSessionId;
-      sessionReboundDuringRun = finalized.sessionReboundDuringRun;
-      maintenanceRequest = finalized.maintenance;
-      return finalized.deliveryResult;
     });
   } catch (error) {
     commandError = error;

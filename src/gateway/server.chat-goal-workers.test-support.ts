@@ -459,8 +459,8 @@ export function registerWorkerGoalChatCases(
   it.each([
     { caseName: "the existing session is busy", busy: true, entry: {} },
     {
-      caseName: "the session used the native Codex harness",
-      entry: { agentHarnessId: "codex" },
+      caseName: "the session used an unsupported harness",
+      entry: { agentHarnessId: "external" },
     },
   ])("leaves no Goal or turn when $caseName", async ({ entry, busy }) => {
     const { sessionKey, sessionId } = scope();
@@ -485,7 +485,7 @@ export function registerWorkerGoalChatCases(
         expect.objectContaining({
           code: "INVALID_REQUEST",
           message:
-            "Error: Goal start or resume requires an idle built-in local session with recoverable history or a supported Codex cloud-worker session.",
+            "Error: Goal start or resume requires an idle OpenClaw or Codex local session with recoverable history or a supported Codex cloud-worker session.",
         }),
       );
       expect(loadSessionEntry(scope())?.goal).toBeUndefined();

@@ -1,4 +1,8 @@
 import { patchSessionEntryCore } from "../../config/sessions/session-accessor.js";
+import {
+  reduceSessionBookkeeping,
+  type SessionEntryBookkeepingReducer,
+} from "../../config/sessions/session-entry-patch-operation.js";
 import { buildSessionCreationStamp } from "../../config/sessions/session-entry-provenance.js";
 import { mergeSessionSnapshotChanges } from "../../config/sessions/session-snapshot-merge.js";
 import {
@@ -13,6 +17,7 @@ type PersistSessionEntryParams = {
   storePath: string;
   initialEntry: SessionEntry;
   entry: SessionEntry;
+  reducers?: SessionEntryBookkeepingReducer[];
   creation?: Parameters<typeof buildSessionCreationStamp>[0];
   assertCommitAllowed?: SessionSourceAssertion;
   shouldPersist?: (entry: SessionEntry | undefined) => boolean;
@@ -46,11 +51,15 @@ export async function persistAgentSession(
       }
       // Agent turns persist broad snapshots. Project only this turn's changes
       // so a stale snapshot cannot restore fields changed or cleared meanwhile.
-      return mergeSessionSnapshotChanges({
+      const next = mergeSessionSnapshotChanges({
         initial: params.initialEntry,
         next: params.entry,
         current: context.existingEntry,
       });
+      for (const reducer of params.reducers ?? []) {
+        Object.assign(next, reduceSessionBookkeeping(next, reducer));
+      }
+      return next;
     },
     {
       fallbackEntry: params.sessionStore[params.sessionKey] ?? params.entry,

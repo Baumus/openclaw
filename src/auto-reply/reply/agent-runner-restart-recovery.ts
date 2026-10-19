@@ -56,6 +56,7 @@ export function createReplyAgentRestartRecoveryController(
   const admissionRunId = resolveReplyAdmissionRunId(sessionCtx);
   const recovery = createReplyRestartRecoveryClaimController({
     agentId: followupRun.run.agentId,
+    goalContinuation: followupRun.goalContinuation,
     operationAdmission: lifecycleAdmissionByOperation.get(replyOperation),
     acquireSessionActor: async () => {
       const actor = await acquireReplyOperationSessionActor(replyOperation);

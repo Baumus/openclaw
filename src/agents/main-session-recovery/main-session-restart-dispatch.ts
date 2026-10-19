@@ -3,6 +3,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { GatewayClientRequestError } from "../../../packages/gateway-client/src/index.js";
 import { isExecutionIdentityCollectionEnabled } from "../../audit/audit-config.js";
 import { stripInternalMetadataForDisplay } from "../../auto-reply/reply/display-text-sanitize.js";
+import { isGoalContinuationCurrent } from "../../auto-reply/reply/goal-continuation.js";
 import { hasRestartRecoveryTerminalRun } from "../../config/sessions/restart-recovery-state.js";
 import { applySessionEntryReplacements } from "../../config/sessions/session-accessor.js";
 import { retainPreparedSessionEntryPredicate } from "../../config/sessions/session-accessor.sqlite-entry-cache-publication-state.js";
@@ -182,10 +183,18 @@ async function resumeMainSessionWithinAdmission(
   const source = captureSessionEntryMetadataRead(params, () => {});
   const taskRemainsOwed = () => {
     params.completionSource?.();
+    const entry = source ? source.readCurrent() : params.entry;
+    const continuation = params.entry.restartRecoveryGoalContinuation;
+    // Interruption sets abortedLastRun; it must not revoke a still-active goal.
+    if (
+      continuation &&
+      (!entry || !isGoalContinuationCurrent(continuation, { ...entry, abortedLastRun: false }))
+    ) {
+      return false;
+    }
     if (!harnessCompletion) {
       return true;
     }
-    const entry = source ? source.readCurrent() : params.entry;
     return Boolean(entry && getOwedHarnessCompletionTask(harnessCompletion, entry));
   };
   if (!taskRemainsOwed()) {

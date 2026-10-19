@@ -45,6 +45,11 @@ export function projectRestartRecoveryCompaction(entry: SessionEntry, sessionId:
     current: { sessionId, lifecycleRevision: entry.lifecycleRevision },
   });
   return {
+    restartRecoveryGoalContinuation: advanceRestartSource(
+      entry.restartRecoveryGoalContinuation,
+      entry,
+      sessionId,
+    ),
     restartRecoveryOperatorSource: advanceRestartSource(
       entry.restartRecoveryOperatorSource,
       entry,

@@ -1,4 +1,5 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
 import { createAdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { AgentHarnessPreflightError } from "../../agents/harness/errors.js";
 import { resolvePreparedSandboxRuntimeStatus } from "../../agents/sandbox/runtime-status.js";
@@ -22,6 +23,7 @@ import {
   bindCommandOwnerAuthority,
   captureCommandOwnerAssertion,
 } from "../command-owner-authority.js";
+import * as goalContinuation from "./goal-continuation.js";
 import type { FollowupRun } from "./queue/types.js";
 import type { AdmittedFollowupTurn } from "./reply-agent-turn-preparation.js";
 import { resolveReplyToolAuthorityContext } from "./reply-tool-authority.js";
@@ -198,6 +200,19 @@ function createActiveGoalEntry(): SessionEntry {
 }
 
 describe("prepareReplyAgentTurn", () => {
+  it("releases queue admission when Stop interrupts pending Goal acceptance", async () => {
+    const staging = createDeferred<undefined>();
+    const abort = new AbortController();
+    const queued = createRun({ abortSignal: abort.signal, goalContinuationReady: staging.promise });
+    const pending = prepareReplyAgentTurn({ queued, defaults: createDefaults() });
+    await Promise.resolve();
+    abort.abort(new Error("Stop"));
+    await expect(pending).rejects.toThrow("Operation aborted");
+    expect(releaseSessionControllerClaim).toHaveBeenCalledOnce();
+    expect(state.admitReply).not.toHaveBeenCalled();
+    staging.resolve(undefined);
+  });
+
   it("retains an undefined preflight rejection as an executable failure", async () => {
     state.preflight.mockRejectedValueOnce(undefined);
 
@@ -422,6 +437,49 @@ describe("prepareReplyAgentTurn", () => {
     expect(operation.complete).not.toHaveBeenCalled();
     expect(state.preflight).not.toHaveBeenCalled();
   });
+
+  it.each(["local", "worker", "no-authority", "revoked"] as const)(
+    "revalidates local Codex Goal placement and authority before execution (%s)",
+    async (mode) => {
+      const operation = createOperation();
+      const current = { ...createActiveGoalEntry(), agentHarnessId: "codex" };
+      const queued = createRun({
+        goalContinuation: { sessionId: "queued-session", goalId: "goal" },
+      });
+      let revoked = false;
+      if (mode !== "no-authority") {
+        queued.operatorAuthority = createAdmittedRunOperatorAuthority({
+          profileId: "operator",
+          scopes: ["operator.admin"],
+          assertCurrent: () => {
+            if (revoked) {
+              throw new Error("operator revoked");
+            }
+          },
+        });
+      }
+      using placement = vi
+        .spyOn(goalContinuation, "resolveCodexGoalPlacement")
+        .mockImplementation(async () => {
+          revoked = mode === "revoked";
+          return mode === "worker" ? "worker" : "local";
+        });
+      state.admitReply.mockResolvedValue({ status: "owned", operation, sessionEntry: current });
+      state.loadEntry.mockReturnValue(current);
+      const result = prepareReplyAgentTurn({
+        queued,
+        defaults: createDefaults({ sessionEntry: current, storePath: "/fixture/sessions.json" }),
+      });
+      if (mode === "revoked") {
+        await expect(result).rejects.toThrow("operator revoked");
+      } else {
+        expect(await result).toMatchObject(
+          mode === "local" ? { kind: "admitted" } : { kind: "skipped", reason: "goal-inactive" },
+        );
+      }
+      expect(placement).toHaveBeenCalledTimes(mode === "no-authority" ? 0 : 1);
+    },
+  );
 
   it("rechecks the Goal after awaited compaction preparation", async () => {
     const operation = createOperation();

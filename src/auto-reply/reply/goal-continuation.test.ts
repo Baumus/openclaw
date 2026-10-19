@@ -4,10 +4,12 @@ import { createAdmittedRunOperatorAuthority } from "../../agents/admitted-run-co
 import { runEmbeddedAttempt } from "../../agents/embedded-agent-runner/run/attempt.js";
 import type { EmbeddedAgentRunResult } from "../../agents/embedded-agent-runner/types.js";
 import { createOpenClawAgentHarness } from "../../agents/harness/builtin-openclaw.js";
+import { runAgentHarnessLifecycleAttempt } from "../../agents/harness/lifecycle.js";
 import {
   createAttemptParams,
   createAttemptResult,
 } from "../../agents/harness/lifecycle.test-support.js";
+import type { AgentHarnessAttemptParamsV2 } from "../../agents/harness/types.js";
 import type { SubagentRunRecord } from "../../agents/subagents/registry/subagent-registry.types.js";
 import { readSessionEntryReadOnlyInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
@@ -25,10 +27,12 @@ import {
   stopSession,
 } from "../../sessions/session-controller.stop.js";
 import { captureSessionTarget } from "../../sessions/session-controller.target.js";
+import * as pendingGoals from "./goal-continuation-pending.js";
 import {
   bindGoalContinuationExecution,
   promoteGoalContinuationYield,
   withGoalContinuationSettlement,
+  withGoalContinuationCommand,
   readGoalContinuationContext,
   prepareGoalContinuationContext,
   recordGoalContinuationSettlement,
@@ -171,6 +175,8 @@ function fixture() {
 beforeEach(() => {
   vi.useFakeTimers();
   children.mockResolvedValue([]);
+  workerPlacement.supported = true;
+  workerPlacement.current.mockReset();
   vi.mocked(enqueueFollowupRun).mockClear();
   vi.mocked(getFollowupQueueDepth).mockReturnValue(0);
   vi.mocked(readSessionEntryReadOnlyInWorker).mockResolvedValue(entry());
@@ -239,15 +245,114 @@ describe("Goal continuation eligibility", () => {
       terminalAtMs: null,
       recoveryError: null,
     });
-    expect(await enqueueGoalContinuation(f.params)).toBe(mode === "remote-exec");
+    expect(await enqueueGoalContinuation(f.params)).toBe(
+      mode === "remote-exec" || mode === "local",
+    );
     if (mode === "remote-exec") {
       expect(vi.mocked(enqueueFollowupRun).mock.calls[0]![1].goalContinuation).toEqual({
         ...identity,
         workerGoal: true,
       });
+    } else if (mode === "local") {
+      expect(vi.mocked(enqueueFollowupRun).mock.calls[0]![1].goalContinuation).toEqual(identity);
     } else {
       expect(enqueueFollowupRun).not.toHaveBeenCalled();
     }
+  });
+  it.each(["local", "worker-required", "no-authority", "revoked"] as const)(
+    "admits unplaced Codex goals only with current local authority (%s)",
+    async (mode) => {
+      const f = fixture();
+      vi.mocked(readSessionEntryReadOnlyInWorker).mockResolvedValue({
+        ...entry(),
+        agentHarnessId: "codex",
+      });
+      if (mode !== "no-authority") {
+        f.params.base.operatorAuthority = {
+          profileId: "operator",
+          scopes: ["operator.admin"],
+          assertCurrent: () => {
+            if (mode === "revoked") {
+              throw new Error("operator revoked");
+            }
+          },
+        };
+      }
+      if (mode === "worker-required") {
+        f.params.base.run.config = { cloudWorkers: { requiredProfile: "worker" } };
+      }
+      if (mode === "revoked") {
+        await expect(enqueueGoalContinuation(f.params)).rejects.toThrow("operator revoked");
+      } else {
+        expect(await enqueueGoalContinuation(f.params)).toBe(mode === "local");
+      }
+      expect(enqueueFollowupRun).toHaveBeenCalledTimes(mode === "local" ? 1 : 0);
+    },
+  );
+  it("accepts durable Goal custody only after the predecessor reply completes", async () => {
+    const f = fixture();
+    const staged = createDeferred();
+    using stage = vi
+      .spyOn(pendingGoals, "stageGoalContinuationPendingInput")
+      .mockImplementation(async () => staged.promise);
+    await enqueueGoalContinuation(f.params);
+    const queued = vi.mocked(enqueueFollowupRun).mock.calls[0]![1];
+    expect(stage).not.toHaveBeenCalled();
+    f.operation.complete();
+    await Promise.resolve();
+    expect(stage).toHaveBeenCalledOnce();
+    let ready = false;
+    void queued.goalContinuationReady?.then(() => {
+      ready = true;
+    });
+    await Promise.resolve();
+    expect(ready).toBe(false);
+    staged.resolve();
+    await queued.goalContinuationReady;
+    expect(ready).toBe(true);
+  });
+  it.each(["stop", "pause"] as const)(
+    "retires accepted Goal input when %s arrives during staging",
+    async (mode) => {
+      const f = fixture();
+      const staged = createDeferred();
+      const started = createDeferred();
+      const abandoned = vi.fn(async () => {});
+      using stage = vi
+        .spyOn(pendingGoals, "stageGoalContinuationPendingInput")
+        .mockImplementation(async ({ nudge }) => {
+          started.resolve();
+          await staged.promise;
+          nudge.turnAdoptionLifecycle = { onAdopted() {}, onAbandoned: abandoned };
+        });
+      await enqueueGoalContinuation(f.params);
+      const queued = vi.mocked(enqueueFollowupRun).mock.calls[0]![1];
+      f.operation.complete();
+      await started.promise;
+      if (mode === "stop") {
+        f.controller.abort();
+      } else {
+        const paused = entry();
+        paused.goal!.status = "paused";
+        vi.mocked(readSessionEntryReadOnlyInWorker).mockResolvedValue(paused);
+      }
+      staged.resolve();
+      await queued.goalContinuationReady;
+      expect(queued.abortSignal?.aborted).toBe(true);
+      expect(abandoned).toHaveBeenCalledOnce();
+      expect(stage).toHaveBeenCalledOnce();
+    },
+  );
+  it("does not persist a continuation when predecessor reply delivery fails", async () => {
+    const f = fixture();
+    using stage = vi.spyOn(pendingGoals, "stageGoalContinuationPendingInput");
+    await enqueueGoalContinuation(f.params);
+    const queued = vi.mocked(enqueueFollowupRun).mock.calls[0]![1];
+    f.operation.fail("run_failed", new Error("delivery failed"));
+    f.operation.complete();
+    await queued.goalContinuationReady;
+    expect(queued.abortSignal?.aborted).toBe(true);
+    expect(stage).not.toHaveBeenCalled();
   });
   it("does not resume paused goals", () => {
     const current = entry();
@@ -266,7 +371,7 @@ describe("Goal continuation eligibility", () => {
       isGoalContinuationCurrent(identity, { ...current, lifecycleRevision: "revision-3" }),
     ).toBe(false);
     expect(isGoalContinuationCurrent(identity, { ...current, abortedLastRun: true })).toBe(false);
-    expect(isGoalContinuationCurrent(identity, { ...current, agentHarnessId: "codex" })).toBe(
+    expect(isGoalContinuationCurrent(identity, { ...current, agentHarnessId: "external" })).toBe(
       false,
     );
     expect(
@@ -409,7 +514,7 @@ describe("Goal queue custody", () => {
   });
 });
 
-function retainedGoal(existingChild?: SubagentRunRecord) {
+function retainedGoal(existingChild?: SubagentRunRecord, sessionEntry = entry()) {
   const f = fixture();
   const child: SubagentRunRecord = existingChild ?? {
     runId: "goal-child",
@@ -447,7 +552,7 @@ function retainedGoal(existingChild?: SubagentRunRecord) {
           prepareGoalContinuationContext({
             runId,
             sessionKey: f.params.sessionKey,
-            sessionEntry: entry(),
+            sessionEntry,
           });
         }
         const context = readGoalContinuationContext({ runId, sessionKey: f.params.sessionKey });
@@ -479,6 +584,90 @@ function retainedGoal(existingChild?: SubagentRunRecord) {
 }
 
 describe("Goal return from committed child custody", () => {
+  it("keeps a recovered command's child return in the existing Goal queue", async () => {
+    const f = retainedGoal();
+    const execute = vi.fn(async (_params: AgentHarnessAttemptParamsV2) => {
+      promoteGoalContinuationYield({
+        requesterTurnRunId: "recovered-run",
+        entries: [f.child],
+        rearmGeneration: f.child.requesterSettleWake?.rearmGeneration,
+      });
+      return createAttemptResult();
+    });
+    await createGoalContinuationReturn(f.params)(() =>
+      withGoalContinuationCommand(
+        {
+          runId: "recovered-run",
+          sessionKey: f.params.sessionKey,
+          entry: entry(),
+        },
+        () =>
+          runAgentHarnessLifecycleAttempt(
+            {
+              id: "codex",
+              label: "Codex",
+              supports: () => ({ supported: true }),
+              runAttempt: execute,
+            },
+            { ...createAttemptParams(), runId: "recovered-run", sessionKey: f.params.sessionKey },
+          ),
+      ),
+    );
+    expect(execute.mock.calls[0]?.[0].currentInboundContext?.text).toContain(
+      "Active goal: Finish the checklist",
+    );
+    f.operation.complete();
+    expect(f.publish()?.text).toContain("Active goal: Finish the checklist");
+    await f.finish();
+    expect(vi.mocked(enqueueFollowupRun).mock.calls[0]?.[1].goalContinuation).toEqual(identity);
+  });
+
+  it("restores Codex goal context after a child settles and queues a fresh admitted attempt", async () => {
+    const current = { ...entry(), agentHarnessId: "codex" };
+    vi.mocked(readSessionEntryReadOnlyInWorker).mockResolvedValue(current);
+    const f = retainedGoal(undefined, current);
+    f.params.base.operatorAuthority = {
+      profileId: "operator",
+      scopes: ["operator.admin"],
+      assertCurrent: () => {},
+    };
+    f.retain();
+    f.operation.complete();
+    const execute = vi.fn(async (_params: AgentHarnessAttemptParamsV2) => createAttemptResult());
+    await withGoalContinuationSettlement(
+      [f.child],
+      "settle-run",
+      () => true,
+      async () => {
+        prepareGoalContinuationContext({
+          runId: "settle-run",
+          sessionKey: f.params.sessionKey,
+          sessionEntry: current,
+        });
+        await runAgentHarnessLifecycleAttempt(
+          {
+            id: "codex",
+            label: "Codex",
+            supports: () => ({ supported: true }),
+            runAttempt: execute,
+          },
+          { ...createAttemptParams(), runId: "settle-run", sessionKey: f.params.sessionKey },
+        );
+        recordGoalContinuationSettlement({
+          runId: "settle-run",
+          sessionKey: f.params.sessionKey,
+          result: normal,
+          succeeded: true,
+        });
+      },
+    );
+    expect(execute.mock.calls[0]?.[0].currentInboundContext?.text).toContain(
+      "Active goal: Finish the checklist",
+    );
+    await f.finish();
+    expect(vi.mocked(enqueueFollowupRun).mock.calls[0]?.[1].goalContinuation).toEqual(identity);
+  });
+
   it.each(["settle-run", "independent-command"])(
     "injects Goal context at the actual built-in harness only for the admitted settlement (%s)",
     async (runId) => {
@@ -495,7 +684,7 @@ describe("Goal return from committed child custody", () => {
             sessionEntry: entry(),
           });
           vi.mocked(runEmbeddedAttempt).mockClear();
-          await createOpenClawAgentHarness().runAttempt({
+          await runAgentHarnessLifecycleAttempt(createOpenClawAgentHarness(), {
             ...createAttemptParams(),
             runId,
             sessionKey: f.params.sessionKey,

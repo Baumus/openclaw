@@ -1,3 +1,4 @@
+import type { GoalContinuation } from "../../auto-reply/reply/goal-continuation.types.js";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/source-reply-delivery-mode.types.js";
 import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 
@@ -98,6 +99,8 @@ export type SessionRestartRecoveryState = {
   restartRecoveryDeliveryRunId?: string;
   restartRecoveryDeliverySourceRunId?: string;
   restartRecoveryHarnessCompletion?: HarnessCompletionRecovery;
+  /** Goal identity captured by the admitted continuation, never inferred after restart. */
+  restartRecoveryGoalContinuation?: GoalContinuation;
   restartRecoveryRequesterAccountId?: string;
   restartRecoveryRequesterSenderId?: string;
   restartRecoverySameChannelThreadRequired?: true;

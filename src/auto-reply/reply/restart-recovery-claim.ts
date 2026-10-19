@@ -51,7 +51,10 @@ import type {
   ReplyRecoveryAdoption,
 } from "./restart-recovery-claim.types.js";
 import { readReplyAdmissionSession } from "./restart-recovery-placement.js";
-import { retireTerminalRestartRecoverySourceClaim } from "./restart-recovery-source.js";
+import {
+  canTransferControlUiRecoveryClaim,
+  retireTerminalRestartRecoverySourceClaim,
+} from "./restart-recovery-source.js";
 
 export function createReplyRestartRecoveryClaimController(
   params: ReplyRestartRecoveryClaimControllerParams,
@@ -456,16 +459,10 @@ export function createReplyRestartRecoveryClaimController(
       return "admitted";
     }
     const updatedAt = Date.now();
-    const canTransferAbortedControlUiClaim = Boolean(
-      admissionRunId &&
-      activeClaimRunId &&
-      admissionRunId !== activeClaimRunId &&
-      entry.abortedLastRun === true &&
-      (entry.status === undefined || entry.status === "interrupted") &&
-      entry.pendingFinalDelivery === undefined &&
-      entry.restartRecoveryBeforeAgentReplyState === undefined &&
-      entry.restartRecoveryDeliveryReceiptState === undefined &&
-      entry.restartRecoverySourceIngress === "control-ui",
+    const canTransferAbortedControlUiClaim = canTransferControlUiRecoveryClaim(
+      entry,
+      admissionRunId,
+      activeClaimRunId,
     );
     if (
       activeClaimRunId &&
@@ -517,6 +514,7 @@ export function createReplyRestartRecoveryClaimController(
           })
         : undefined,
       restartRecoveryDeliverySourceRunId: claimSourceRunId,
+      restartRecoveryGoalContinuation: claimSourceRunId ? params.goalContinuation : undefined,
       restartRecoveryRequesterAccountId: transfersControlUiClaim
         ? undefined
         : normalizeOptionalString(params.requesterAccountId),

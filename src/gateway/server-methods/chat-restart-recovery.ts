@@ -406,7 +406,9 @@ export function resolveRestartSafeChatAdmission(
     !request ||
     !entry ||
     !isDirectChatGoalSession({ ...params, entry }) ||
-    (entry.agentHarnessId !== undefined && entry.agentHarnessId !== OPENCLAW_AGENT_RUNTIME_ID)
+    (entry.agentHarnessId !== undefined &&
+      entry.agentHarnessId !== OPENCLAW_AGENT_RUNTIME_ID &&
+      entry.agentHarnessId !== "codex")
   ) {
     return undefined;
   }
