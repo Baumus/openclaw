@@ -5,7 +5,9 @@ import { captureQueuedOperatorRecoverySource } from "../../gateway/operator-run-
 import { getGatewayRestartDrainSignal } from "../../process/gateway-work-admission.js";
 import { createUserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
 import type { PersistedUserTurnMessage } from "../../sessions/user-turn-transcript.types.js";
+import { isGoalExecutionPolicy } from "./goal-continuation.types.js";
 import type { GoalContinuation } from "./goal-continuation.types.js";
+import { captureGoalExecutionPolicy } from "./goal-execution-policy.js";
 import type { FollowupRun } from "./queue/types.js";
 
 export type PendingGoalContinuation = {
@@ -61,6 +63,8 @@ export function readPendingGoalContinuation(
     typeof value.continuation.goalId !== "string" ||
     (value.continuation.lifecycleRevision !== undefined &&
       typeof value.continuation.lifecycleRevision !== "string") ||
+    (value.continuation.executionPolicy !== undefined &&
+      !isGoalExecutionPolicy(value.continuation.executionPolicy)) ||
     (value.continuation.workerGoal !== undefined && value.continuation.workerGoal !== true) ||
     message.idempotencyKey !== `${value.runId}:user` ||
     message.provenance?.kind !== "internal_system" ||
@@ -97,6 +101,9 @@ export function readPendingGoalContinuation(
     continuation: {
       sessionId: value.continuation.sessionId,
       goalId: value.continuation.goalId,
+      ...(value.continuation.executionPolicy
+        ? { executionPolicy: value.continuation.executionPolicy }
+        : {}),
       lifecycleRevision: value.continuation.lifecycleRevision,
       ...(value.continuation.workerGoal === true ? { workerGoal: true } : {}),
     },
@@ -125,6 +132,10 @@ export async function stageGoalContinuationPendingInput(params: {
   ) {
     return;
   }
+  nudge.goalContinuation = {
+    ...nudge.goalContinuation,
+    executionPolicy: captureGoalExecutionPolicy(nudge),
+  };
   const pending: PendingGoalContinuation = {
     version: 1,
     runId: nudge.messageId,

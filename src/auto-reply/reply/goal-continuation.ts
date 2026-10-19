@@ -21,6 +21,7 @@ import { createDeferredCore } from "../../shared/deferred.js";
 import { stageGoalContinuationPendingInput } from "./goal-continuation-pending.js";
 import { createGoalContinuationReturnScope } from "./goal-continuation-return.js";
 import type { GoalContinuation } from "./goal-continuation.types.js";
+import { captureGoalExecutionPolicy } from "./goal-execution-policy.js";
 import { refreshActiveGoalContext } from "./inbound-meta.js";
 import { scheduleFollowupDrain } from "./queue/drain.js";
 import { enqueueFollowupRun, getFollowupQueueDepth } from "./queue/enqueue.js";
@@ -181,6 +182,7 @@ export async function enqueueGoalContinuation(params: GoalContinuationParams): P
   const continuation: GoalContinuation = {
     ...params.expectedSession,
     goalId: params.initialGoalId ?? entry.goal.id,
+    executionPolicy: captureGoalExecutionPolicy(params.base),
     ...(codexPlacement === "worker" ? { workerGoal: true as const } : {}),
   };
   if (!isGoalContinuationCurrent(continuation, entry)) {
@@ -294,6 +296,7 @@ export function createGoalContinuationReturn(
     sessionId: params.expectedSession.sessionId,
     lifecycleRevision: params.expectedSession.lifecycleRevision,
     goalId: params.initialGoalId,
+    executionPolicy: captureGoalExecutionPolicy(params.base),
   };
   return createGoalContinuationReturnScope({
     base: params.base,

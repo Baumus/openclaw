@@ -489,6 +489,7 @@ export function resolveCompletionToolPolicy(params: {
         : undefined
     : run.opts.toolsAllow;
   const disableTools =
+    run.opts.disableTools === true ||
     run.opts.modelRun === true ||
     (isSubagentAnnounceHandoff &&
       !completionRetainsRequesterTools &&

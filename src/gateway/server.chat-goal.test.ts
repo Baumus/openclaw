@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { StatementSync } from "node:sqlite";
+import { expectDefined } from "@openclaw/normalization-core/expect";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -62,10 +63,12 @@ import {
 import { createSessionRowProjection } from "./session-row-projection.js";
 import {
   createGatewaySuiteHarness,
+  connectOk,
   dispatchInboundMessageMock,
   gatewayReplyMock,
   installGatewayTestHooks,
   prepareGatewayReplyRuntimeForTest,
+  rpcReq,
   testState,
   writeSessionStore,
 } from "./test-helpers.js";
@@ -92,11 +95,21 @@ const client: GatewayClient = {
 };
 let harness: Awaited<ReturnType<typeof createGatewaySuiteHarness>>;
 let context: GatewayRequestContext;
+let liveContext: GatewayRequestContext | undefined;
 let storePath: string;
 let modelStarted = createDeferred();
 let modelRelease: Promise<void> = Promise.resolve();
 
 beforeAll(async () => {
+  const kernelModule = await import("./server-kernel.js");
+  const createKernel = kernelModule.createGatewayKernel;
+  using _ = vi
+    .spyOn(kernelModule, "createGatewayKernel")
+    .mockImplementation(async (...args) => {
+      const kernel = await createKernel(...args);
+      liveContext = kernel.gatewayRequestContext;
+      return kernel;
+    });
   harness = await createGatewaySuiteHarness();
 });
 
@@ -286,7 +299,21 @@ describe("Goal chat admission and continuation", () => {
     goalStart,
     userMessages,
     client,
-    () => context,
+    async () => {
+      const ws = await harness.openWs({ origin: `http://127.0.0.1:${harness.port}` });
+      await connectOk(ws, { client: client.connect.client });
+      expect(await rpcReq(ws, "sessions.subscribe", {})).toMatchObject({ ok: true });
+      return {
+        context: expectDefined(liveContext, "suite Gateway context"),
+        ws,
+        async [Symbol.asyncDispose]() {
+          await new Promise<void>((resolve) => {
+            ws.once("close", () => resolve());
+            ws.close();
+          });
+        },
+      };
+    },
   );
 
   registerGoalChatRestartSettlementCase({

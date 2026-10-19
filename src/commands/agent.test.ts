@@ -450,15 +450,20 @@ describe("agentCommand", () => {
     },
   );
 
-  it.each(["active", "complete", "failed"] as const)(
+  it.each(["active", "disabled", "complete", "failed"] as const)(
     "hands recovered Goal command completion to its current queue (%s)",
     async (mode) => {
+      attemptExecutionMocks.useRealRunAgentAttempt = mode === "disabled";
       await withTempHome(async (home) => {
         const storePath = path.join(home, "sessions.json");
         mockConfig(home, storePath);
         const sessionKey = "agent:main:goal-recovery";
         const sessionId = "goal-recovery-session";
-        const continuation = { sessionId, goalId: "goal-recovery" };
+        const continuation = {
+          sessionId,
+          goalId: "goal-recovery",
+          executionPolicy: mode === "disabled" ? { disableTools: true } : {},
+        };
         await writeSessionStoreSeed(storePath, {
           [sessionKey]: {
             sessionId,
@@ -512,9 +517,17 @@ describe("agentCommand", () => {
           runtime,
         );
         expect(assertCurrent).toHaveBeenCalled();
-        expect(enqueue).toHaveBeenCalledTimes(mode === "active" ? 1 : 0);
-        if (mode === "active") {
-          expect(enqueue.mock.calls[0]?.[1].goalContinuation).toEqual(continuation);
+        expect(enqueue).toHaveBeenCalledTimes(mode === "active" || mode === "disabled" ? 1 : 0);
+        if (mode === "disabled") {
+          // Check the actual native-harness attempt contract, not an equivalent host allowlist.
+          expect(getLastEmbeddedCall()?.disableTools).toBe(true);
+          expect(enqueue.mock.calls[0]?.[1].disableTools).toBe(true);
+          expect(enqueue.mock.calls[0]?.[1].goalContinuation?.executionPolicy?.disableTools).toBe(
+            true,
+          );
+        }
+        if (mode === "active" || mode === "disabled") {
+          expect(enqueue.mock.calls[0]?.[1].goalContinuation).toMatchObject(continuation);
           expect(enqueue.mock.calls[0]?.[1].operatorAuthority).toBe(operatorAuthority);
         }
       });

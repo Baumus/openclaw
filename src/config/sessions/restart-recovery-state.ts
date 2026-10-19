@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { asOptionalObjectRecord, isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString as normalizeRunId } from "@openclaw/normalization-core/string-coerce";
 import { normalizeUniqueTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import { isGoalExecutionPolicy } from "../../auto-reply/reply/goal-continuation.types.js";
 import {
   isAcpSessionKey,
   isCronSessionKey,
@@ -447,7 +448,10 @@ export function normalizeRestartRecoveryEntryFields(
     (continuation.lifecycleRevision === undefined ||
       typeof continuation.lifecycleRevision === "string") &&
     (continuation.workerGoal === undefined || continuation.workerGoal === true)
-      ? entry.restartRecoveryGoalContinuation
+      ? continuation.executionPolicy !== undefined &&
+        !isGoalExecutionPolicy(continuation.executionPolicy)
+        ? { ...entry.restartRecoveryGoalContinuation!, executionPolicy: undefined }
+        : entry.restartRecoveryGoalContinuation
       : undefined;
   assign("restartRecoveryGoalContinuation", normalizedContinuation);
   const harnessCompletion = normalizeHarnessCompletionRecovery(

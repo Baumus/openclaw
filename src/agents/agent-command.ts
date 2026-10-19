@@ -1,4 +1,5 @@
 import { addAbortListener } from "node:events";
+import { restoreGoalExecutionPolicy } from "../auto-reply/reply/goal-execution-policy.js";
 import type { VerboseLevel } from "../auto-reply/thinking.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { createSessionWorkStartChangedError } from "../config/sessions/lifecycle.js";
@@ -153,6 +154,14 @@ async function agentCommandInternalOwned(
     },
     abortSignal: lifecycleAbortController.signal,
   };
+  if (prepared.sessionEntry?.restartRecoveryGoalContinuation) {
+    const sourcePolicy = restoreGoalExecutionPolicy(
+      prepared.sessionEntry.restartRecoveryGoalContinuation.executionPolicy,
+      { ...opts, disableTools: opts.disableTools === true || opts.modelRun === true },
+    );
+    Object.assign(opts, sourcePolicy);
+    opts.toolsAllow = sourcePolicy.disableTools ? [] : sourcePolicy.toolsAllow;
+  }
   const preparedContext = { ...prepared };
   const {
     cfg,
@@ -481,6 +490,10 @@ async function agentCommandInternalOwned(
           runId,
           agentId: sessionAgentId,
           operation: turnOwner,
+          executionPolicy: {
+            ...opts,
+            disableTools: opts.disableTools === true || opts.modelRun === true,
+          },
           operatorAuthority: opts.operatorAuthority,
           signal: opts.abortSignal,
           ...(currentRunDeliveryContext?.channel && currentRunDeliveryContext.to

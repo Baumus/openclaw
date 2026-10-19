@@ -21,6 +21,10 @@ import {
   isGoalContinuationOutcome,
 } from "../auto-reply/reply/goal-continuation.js";
 import type { GoalContinuation } from "../auto-reply/reply/goal-continuation.types.js";
+import {
+  captureGoalExecutionPolicy,
+  restoreGoalExecutionPolicy,
+} from "../auto-reply/reply/goal-execution-policy.js";
 import { enqueueFollowupRun, getFollowupQueueDepth } from "../auto-reply/reply/queue/enqueue.js";
 import { resolveQueueSettings } from "../auto-reply/reply/queue/settings-runtime.js";
 import type { FollowupRun } from "../auto-reply/reply/queue/types.js";
@@ -46,7 +50,8 @@ import type { ReplyOperation } from "../sessions/session-controller.contracts.js
 import { createUserTurnTranscriptRecorder } from "../sessions/user-turn-transcript.js";
 import type { PersistedUserTurnMessage } from "../sessions/user-turn-transcript.types.js";
 import type { DeliveryContext } from "../utils/delivery-context.shared.js";
-import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
+import { INTERNAL_MESSAGE_CHANNEL, isInternalMessageChannel } from "../utils/message-channel.js";
+import { createRecoveredGoalReplyDisposition } from "./goal-continuation-recovery-delivery.js";
 import { restoreGatewayQueuedOperatorRecovery } from "./operator-run-recovery.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 import { prepareRecoverySource } from "./session-recovery-source.js";
@@ -217,6 +222,7 @@ export function buildRecoveredGoalFollowup(params: {
   context: GatewayRequestContext;
   entry: SessionEntry;
   sessionKey: string;
+  storePath?: string;
   goal: PendingGoalContinuation;
   operatorAuthority: AdmittedRunOperatorAuthority;
   signal?: AbortSignal;
@@ -231,7 +237,9 @@ export function buildRecoveredGoalFollowup(params: {
       overrideProvider: current.providerOverride,
       overrideModel: current.modelOverride,
     }) ?? defaultModel;
+  const originatingChannel = goal.delivery?.channel ?? INTERNAL_MESSAGE_CHANNEL;
   return {
+    ...restoreGoalExecutionPolicy(goal.continuation.executionPolicy),
     prompt: goal.prompt,
     enqueuedAt: params.enqueuedAt ?? Date.now(),
     messageId: goal.runId,
@@ -240,7 +248,20 @@ export function buildRecoveredGoalFollowup(params: {
     operatorAuthority,
     abortSignal: signal,
     readAdmissionConfig: context.getRuntimeConfig,
-    originatingChannel: goal.delivery?.channel,
+    originatingChannel,
+    queuedFollowupReplyDisposition: isInternalMessageChannel(originatingChannel)
+      ? createRecoveredGoalReplyDisposition({
+          context,
+          sessionKey,
+          storePath: params.storePath,
+          sessionId: current.sessionId,
+          lifecycleRevision: current.lifecycleRevision,
+          agentId: goal.agentId,
+          runId: goal.runId,
+          operatorAuthority,
+          signal,
+        })
+      : undefined,
     originatingTo: goal.delivery?.to,
     originatingAccountId: goal.delivery?.accountId,
     originatingThreadId: goal.delivery?.threadId,
@@ -279,6 +300,7 @@ export function createRecoveredGoalCommandReturn(params: {
   operation: ReplyOperation;
   operatorAuthority: AdmittedRunOperatorAuthority;
   delivery?: PendingGoalContinuation["delivery"];
+  executionPolicy: Parameters<typeof captureGoalExecutionPolicy>[0];
   signal?: AbortSignal;
 }): <T>(run: () => T) => T {
   const continuation = params.entry.restartRecoveryGoalContinuation;
@@ -294,7 +316,10 @@ export function createRecoveredGoalCommandReturn(params: {
       runId: params.runId,
       agentId: params.agentId,
       sessionKey: params.sessionKey,
-      continuation,
+      continuation: {
+        ...continuation,
+        executionPolicy: captureGoalExecutionPolicy(params.executionPolicy),
+      },
       prompt: GOAL_CONTINUATION_PROMPT,
       operatorSource: undefined,
       delivery: params.delivery,
@@ -404,6 +429,7 @@ export async function enqueueRecoveredGoalContinuation(params: {
     context,
     entry: current,
     sessionKey,
+    storePath,
     goal,
     operatorAuthority: params.operatorAuthority,
     signal,
@@ -451,7 +477,16 @@ export async function resumeCompletedGoalContinuation(params: {
   continuation: GoalContinuation;
   entry?: SessionEntry;
   source: { sessionKey?: string; storePath?: string; runId: string; sessionAgentId: string };
-  options: Pick<AgentCommandOpts, "operatorAuthority" | "abortSignal">;
+  options: Pick<
+    AgentCommandOpts,
+    | "operatorAuthority"
+    | "abortSignal"
+    | "toolsAllow"
+    | "modelRun"
+    | "disableTools"
+    | "forceRestartSafeTools"
+    | "forceCodeModeTools"
+  >;
   result: EmbeddedAgentRunResult;
   succeeded: boolean;
   deliveryContext?: DeliveryContext;
@@ -490,7 +525,13 @@ export async function resumeCompletedGoalContinuation(params: {
       runId: ["goal", continuation.sessionId, continuation.goalId, source.runId].join(":"),
       agentId: source.sessionAgentId,
       sessionKey: source.sessionKey,
-      continuation,
+      continuation: {
+        ...continuation,
+        executionPolicy: captureGoalExecutionPolicy({
+          ...params.options,
+          disableTools: params.options.disableTools === true || params.options.modelRun === true,
+        }),
+      },
       prompt: GOAL_CONTINUATION_PROMPT,
       operatorSource: undefined,
       ...(deliveryContext?.channel && deliveryContext.to

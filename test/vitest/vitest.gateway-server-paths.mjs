@@ -152,6 +152,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/operator-approval-store.worker.test.ts",
   "src/gateway/operator-run-authority.worker.test.ts",
   "src/gateway/operator-run-recovery.test.ts",
+  "src/gateway/goal-continuation-recovery-auth.test.ts",
   "src/gateway/probe.device-auth-scope.test.ts",
   "src/gateway/progress-card-store.worker.test.ts",
   "src/gateway/provider-auth-account-relogin.persistence.integration.test.ts",

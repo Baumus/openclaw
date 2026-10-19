@@ -106,6 +106,7 @@ const identity = {
   sessionId: "goal-session",
   lifecycleRevision: "revision-2",
   goalId: "goal-1",
+  executionPolicy: {},
 };
 const normal: EmbeddedAgentRunResult = {
   meta: { durationMs: 0, stopReason: "end_turn" },

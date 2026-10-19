@@ -1,4 +1,5 @@
 import { expect, it, vi, type MockInstance } from "vitest";
+import type { WebSocket } from "ws";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { createAdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
 import {
@@ -24,7 +25,7 @@ import {
 } from "./goal-continuation-recovery.js";
 import * as operatorRecovery from "./operator-run-recovery.js";
 import type { GatewayRequestContext, GatewayClient, RespondFn } from "./server-methods/types.js";
-import { prepareGatewayReplyRuntimeForTest } from "./test-helpers.js";
+import { onceMessage, prepareGatewayReplyRuntimeForTest } from "./test-helpers.js";
 import { getTestPluginRegistry } from "./test-helpers.plugin-registry.js";
 
 /** Reuse the suite's admission, queue and reply owners; only provider execution is simulated. */
@@ -40,12 +41,17 @@ export function registerGoalAutomaticContinuationCases(
   goalStart: (message: string) => Record<string, unknown>,
   userMessages: () => readonly unknown[],
   client: GatewayClient,
-  gatewayContext: () => GatewayRequestContext,
+  liveGateway: () => Promise<{
+    context: GatewayRequestContext;
+    ws: WebSocket;
+    [Symbol.asyncDispose](): Promise<void>;
+  }>,
 ) {
-  it("replays an accepted pending Goal through consecutive followup turns", async () => {
+  it("replays an accepted pending Goal through consecutive followup turns and delivers to attached WebChat", async () => {
+    await using live = await liveGateway();
     using enqueue = vi.spyOn(followupQueue, "enqueueFollowupRun");
     using prepare = vi.spyOn(replyPreparation, "prepareReplyAgentTurn");
-    using warn = vi.spyOn(gatewayContext().logGateway, "warn");
+    using warn = vi.spyOn(live.context.logGateway, "warn");
     const identity = scope();
     const savedGoal = {
       schemaVersion: 1 as const,
@@ -98,9 +104,10 @@ export function registerGoalAutomaticContinuationCases(
       },
     });
     const nudge = buildRecoveredGoalFollowup({
-      context: gatewayContext(),
+      context: live.context,
       entry,
       sessionKey: identity.sessionKey,
+      storePath: identity.storePath,
       operatorAuthority: authority,
       goal: {
         version: 1,
@@ -111,6 +118,7 @@ export function registerGoalAutomaticContinuationCases(
           sessionId: entry.sessionId,
           lifecycleRevision: entry.lifecycleRevision,
           goalId: savedGoal.id,
+          executionPolicy: {},
         },
         prompt,
         operatorSource: undefined,
@@ -122,7 +130,7 @@ export function registerGoalAutomaticContinuationCases(
     accepted!.finishPendingInput!("interrupted");
     await accepted!.waitForPendingInputSettlement!();
     const targets = await discoverRestartRecoveryStoreTargets({
-      cfg: gatewayContext().getRuntimeConfig(),
+      cfg: live.context.getRuntimeConfig(),
     });
     const target = targets.find((candidate) => candidate.storePath === identity.storePath);
     expect(target, "restart inventory must discover the accepted input's store").toBeDefined();
@@ -148,7 +156,7 @@ export function registerGoalAutomaticContinuationCases(
         }));
       }
       return {
-        payloads: [{ text: "Advance verified" }],
+        payloads: [{ text: `Advance verified ${runEmbeddedAgent.mock.calls.length}` }],
         meta: {
           durationMs: 0,
           stopReason: "end_turn",
@@ -161,7 +169,17 @@ export function registerGoalAutomaticContinuationCases(
         },
       };
     });
-    await recoverGoalContinuations(gatewayContext(), new AbortController().signal);
+    const delivered = onceMessage(
+      live.ws,
+      (frame) =>
+        frame.event === "chat" &&
+        frame.payload?.sessionKey === identity.sessionKey &&
+        frame.payload?.state === "final" &&
+        (JSON.stringify(frame.payload.message) ?? "").includes("Advance verified 2"),
+      20_000,
+    );
+    void delivered.catch(() => {});
+    await recoverGoalContinuations(live.context, new AbortController().signal);
     expect(restored, "recovery must restore accepted input authority").toHaveBeenCalledOnce();
     expect(
       warn.mock.calls,
@@ -184,7 +202,15 @@ export function registerGoalAutomaticContinuationCases(
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
     expect(restored).toHaveBeenCalledOnce();
     expect(loadSessionEntry(identity)?.goal?.status).toBe("complete");
-    await recoverGoalContinuations(gatewayContext(), new AbortController().signal);
+    expect((await delivered).payload).toMatchObject({
+      state: "final",
+      sessionKey: identity.sessionKey,
+      message: {
+        role: "assistant",
+        content: expect.arrayContaining([{ type: "text", text: "Advance verified 2" }]),
+      },
+    });
+    await recoverGoalContinuations(live.context, new AbortController().signal);
     expect(runEmbeddedAgent).toHaveBeenCalledTimes(2);
   });
 

@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAdmittedRunOperatorAuthority } from "../agents/admitted-run-context.js";
+import { applyEmbeddedAttemptToolsAllow } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
+import { attachToolAllowlistIntersection } from "../agents/tool-policy-shared.js";
 import {
   stageGoalContinuationPendingInput,
+  readPendingGoalContinuation,
   type PendingGoalContinuation,
 } from "../auto-reply/reply/goal-continuation-pending.js";
 import { parseSessionPendingInputMessage } from "../config/sessions/session-pending-input-value.js";
@@ -88,7 +91,12 @@ const goal: PendingGoalContinuation = {
   runId: "goal-nudge",
   agentId: "main",
   sessionKey: "agent:main:test",
-  continuation: { sessionId: "session-1", lifecycleRevision: "revision-1", goalId: "goal-1" },
+  continuation: {
+    sessionId: "session-1",
+    lifecycleRevision: "revision-1",
+    goalId: "goal-1",
+    executionPolicy: {},
+  },
   prompt: "Advance the active goal",
   operatorSource: { kind: "fixture" },
 };
@@ -289,4 +297,131 @@ it("never dispatches when operator restoration is revoked", async () => {
   await recoverGoalContinuations(context, new AbortController().signal);
   expect(io.enqueue).not.toHaveBeenCalled();
   expect(context.logGateway.warn).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { label: "read-only", toolsAllow: ["read"], disableTools: false, expected: ["read"] },
+  { label: "empty", toolsAllow: [], disableTools: false, expected: [] },
+  { label: "disabled", toolsAllow: undefined, disableTools: true, expected: [] },
+  {
+    label: "intersection",
+    toolsAllow: attachToolAllowlistIntersection(
+      [],
+      [
+        ["r*", "write"],
+        ["*ad", "exec"],
+      ],
+    ),
+    disableTools: false,
+    expected: ["read"],
+  },
+])(
+  "preserves $label execution effects through durable acceptance and replay",
+  async ({ toolsAllow, disableTools, expected }) => {
+    const authority = createAdmittedRunOperatorAuthority({
+      profileId: "profile",
+      scopes: ["operator.read"],
+      assertCurrent() {},
+      recoverySnapshot: {
+        profileId: "profile",
+        scopes: ["operator.read"],
+        assignedRole: null,
+        githubLogin: null,
+        grant: null,
+        aliasBindingIds: [],
+        authPolicy: {
+          generation: "",
+          grantGeneration: "fixture",
+          role: "operator",
+          authMethod: "token",
+        },
+        controlUiAdmin: true,
+        localOperator: true,
+        sourceIngress: "internal",
+        modelPolicy: undefined,
+      },
+    });
+    const nudge = buildRecoveredGoalFollowup({
+      context,
+      entry,
+      sessionKey: goal.sessionKey,
+      operatorAuthority: authority,
+      goal,
+    });
+    Object.assign(nudge, {
+      toolsAllow,
+      disableTools,
+      forceRestartSafeTools: true,
+      forceCodeModeTools: true,
+    });
+    await stageGoalContinuationPendingInput({
+      nudge,
+      entry,
+      sessionKey: goal.sessionKey,
+      storePath: "/fixture/sessions.sqlite",
+      assertCurrent() {},
+    });
+    const message = parseSessionPendingInputMessage(
+      JSON.stringify(io.recorder.mock.calls[0]![0].message),
+    );
+    const restoredGoal = readPendingGoalContinuation(message)!;
+    const replay = buildRecoveredGoalFollowup({
+      context,
+      entry,
+      sessionKey: goal.sessionKey,
+      operatorAuthority: authority,
+      goal: restoredGoal,
+    });
+    // The actual runtime cap owner selects executable tools; callbacks stand in for external effects.
+    const effects: string[] = [];
+    const tools = ["read", "write", "exec"].map((name) => ({
+      name,
+      execute: async () => {
+        effects.push(name);
+      },
+    }));
+    const callable = applyEmbeddedAttemptToolsAllow(
+      tools,
+      replay.disableTools ? [] : replay.toolsAllow,
+    );
+    for (const tool of callable) {
+      await tool.execute();
+    }
+    expect(effects).toEqual(expected);
+    expect(replay.forceRestartSafeTools).toBe(true);
+    expect(replay.forceCodeModeTools).toBe(true);
+  },
+);
+
+it("keeps legacy Goal inputs blocked visibly when their source policy was not captured", async () => {
+  const legacy = parseSessionPendingInputMessage(
+    JSON.stringify({
+      ...input.message,
+      __openclaw: {
+        goalContinuation: {
+          ...goal,
+          continuation: { ...goal.continuation, executionPolicy: undefined },
+        },
+      },
+    }),
+  );
+  io.pending.mockResolvedValue({ items: [{ ...input, message: legacy }] });
+  io.retained.mockResolvedValue({
+    assertCurrent() {},
+    snapshot: {
+      current: true,
+      pending: {
+        input_id: input.id,
+        state: "interrupted",
+        consumed_event_id: null,
+        message_json: JSON.stringify(legacy),
+      },
+    },
+  });
+  await recoverGoalContinuations(context, new AbortController().signal);
+  expect(io.enqueue).not.toHaveBeenCalled();
+  expect(io.report).toHaveBeenCalled();
+  expect(context.logGateway.warn).toHaveBeenCalledWith(
+    expect.stringContaining("source execution policy"),
+  );
 });
