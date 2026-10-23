@@ -665,13 +665,19 @@ final class GatewayProcessManager {
                         if self.installation == .external { return }
                         let custody = try await self.retainManagedServiceForResume(
                             expectedServiceAuthority: expectedServiceAuthority)
-                        failure = self.launchAgentDisableGeneration == stopGeneration
-                            ? await GatewayLaunchAgentManager.set(
-                                enabled: false,
-                                port: GatewayEnvironment.gatewayPort(),
-                                expectedServiceAuthority: custody,
-                                checkCurrent: mutationCheck)
-                            : nil
+                        // Passive stop owns only the captured profile definition. A direct low-level
+                        // disable still handles label-based ghost recovery when explicitly requested.
+                        if custody.definition.plist == nil {
+                            failure = nil
+                        } else {
+                            failure = self.launchAgentDisableGeneration == stopGeneration
+                                ? await GatewayLaunchAgentManager.set(
+                                    enabled: false,
+                                    port: GatewayEnvironment.gatewayPort(),
+                                    expectedServiceAuthority: custody,
+                                    checkCurrent: mutationCheck)
+                                : nil
+                        }
                     } else {
                         failure = nil
                     }
