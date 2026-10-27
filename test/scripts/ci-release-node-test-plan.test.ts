@@ -102,6 +102,29 @@ it.each([
   },
 );
 
+it("gives unfitted agents-support release work 90-minute headroom", async () => {
+  const original = fullSuiteVitestShards.slice();
+  const config = "test/vitest/vitest.agents-support.config.ts";
+  vi.spyOn(testTimings, "readCompactGroupTimings").mockReturnValue({});
+  fullSuiteVitestShards.splice(
+    0,
+    fullSuiteVitestShards.length,
+    ...original
+      .map((shard) => ({ ...shard, projects: shard.projects.filter((entry) => entry === config) }))
+      .filter((shard) => shard.projects.length > 0),
+  );
+  try {
+    const { createNodeTestShardBundles } = await import("../../scripts/lib/ci-node-test-plan.mts");
+    const rows = createNodeTestShardBundles({ runnerBackend: "github" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.shardName).toBe("agentic-agents-support");
+    expect(rows[0]?.predictedSeconds).toBeUndefined();
+    expect(rows[0]?.timeoutMinutes).toBe(90);
+  } finally {
+    fullSuiteVitestShards.splice(0, fullSuiteVitestShards.length, ...original);
+  }
+});
+
 it("splits measured full-release hosted rows without losing their execution contract", async () => {
   const original = fullSuiteVitestShards.slice();
   const config = "test/vitest/vitest.auto-reply-reply.config.ts";
