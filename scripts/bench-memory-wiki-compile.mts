@@ -1,7 +1,7 @@
 // Run: node --import tsx scripts/bench-memory-wiki-compile.mts <gateway-entry.mjs>
 //   <baseline-plugin-dir> <candidate-plugin-dir> <output.json> [pages=1000] [samples=5]
 // Acceptance: identical page counts and generated content after each edit; fewer
-// compiler page reads (separate compiler work-count fixture); warm RPC median/p95
+// production page reads (WIKI_BENCH_COUNT_READS=1, separate from timed runs); warm RPC median/p95
 // must not regress by 20%. Cold initial compiles are reported separately.
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -9,15 +9,17 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { loadavg, tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PROTOCOL_VERSION } from "../packages/gateway-protocol/src/version.ts";
 import { delay, stopChild } from "./lib/gateway-bench-child.ts";
 import { getFreePort } from "./lib/gateway-bench-probes.ts";
-import { createGatewayBenchEnv } from "./lib/gateway-bench-runtime.ts";
+import { createGatewayBenchEnv, gatewayBenchCpuProfileArgs } from "./lib/gateway-bench-runtime.ts";
 import { createGatewayWsClient } from "./lib/gateway-ws-client.ts";
 
 const [entry, baseline, candidate, output, pagesRaw = "1000", samplesRaw = "5"] =
   process.argv.slice(2);
 assert(entry && baseline && candidate && output, "Expected entry, baseline, candidate, output");
+const countReads = process.env.WIKI_BENCH_COUNT_READS === "1";
 const pages = Number(pagesRaw);
 const samples = Number(samplesRaw);
 assert(Number.isInteger(pages) && pages > 0 && Number.isInteger(samples) && samples > 0);
@@ -35,11 +37,13 @@ const evidence = {
   samples,
   load: loadavg(),
   status: "incomplete",
+  countReads,
   identities: {},
   cold: [],
   warm: [],
 } as {
   status: string;
+  countReads: boolean;
   identities: Record<string, { version: string; digest: string }>;
   pages: number;
   samples: number;
@@ -52,8 +56,77 @@ const evidence = {
     digest: string;
     pageCounts: unknown;
     load: number[];
+    reads: Record<string, number>;
+    sourceGeneration: string;
   }>;
 };
+async function collectReads(child: ChildProcess): Promise<Record<string, number>> {
+  return await new Promise((resolve, reject) => {
+    const receive = (message: unknown) => {
+      if (
+        !message ||
+        typeof message !== "object" ||
+        !("type" in message) ||
+        message.type !== "wiki-benchmark-reads" ||
+        !("reads" in message)
+      ) {
+        return;
+      }
+      clearTimeout(timeout);
+      child.off("message", receive);
+      assert(message.reads && typeof message.reads === "object");
+      const reads: Record<string, number> = {};
+      for (const [file, count] of Object.entries(message.reads)) {
+        assert(typeof count === "number");
+        reads[file] = count;
+      }
+      resolve(reads);
+    };
+    const timeout = setTimeout(() => {
+      child.off("message", receive);
+      reject(new Error("Read counter timeout"));
+    }, 10_000);
+    child.on("message", receive);
+    child.send("wiki-benchmark-reads");
+  });
+}
+async function verifySourceGeneration(vault: string) {
+  const files: string[] = [];
+  for (const dir of ["entities", "concepts", "sources", "syntheses", "reports"]) {
+    for (const name of await fs.readdir(path.join(vault, dir))) {
+      if (name !== "index.md" && name.endsWith(".md")) {
+        files.push(`${dir}/${name}`);
+      }
+    }
+  }
+  const hash = createHash("sha256");
+  for (const file of files.toSorted((a, b) => a.localeCompare(b))) {
+    const encoded = Buffer.from(file);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(encoded.length);
+    hash
+      .update(length)
+      .update(encoded)
+      .update(
+        createHash("sha256")
+          .update(await fs.readFile(path.join(vault, file)))
+          .digest(),
+      );
+  }
+  const actual = hash.digest("hex");
+  const journal = await fs.readFile(path.join(vault, ".openclaw-wiki", "log.jsonl"), "utf8");
+  const published = journal
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .findLast((event) => event.details?.compiledCachePublicationId);
+  assert.equal(
+    published?.details.compiledCacheSourceGeneration,
+    actual,
+    "Published identity must match independently hashed final source bytes",
+  );
+  return actual;
+}
 async function generatedDigest(vault: string) {
   const digest = createHash("sha256");
   digest.update(await fs.readFile(path.join(vault, "index.md")));
@@ -135,15 +208,33 @@ try {
         },
       }),
     );
-    const child = spawn(
+    const child: ChildProcess = spawn(
       process.execPath,
-      [path.resolve(entry), "gateway", "run", "--port", String(port)],
+      [
+        ...gatewayBenchCpuProfileArgs(
+          process.env.WIKI_BENCH_CPU_PROFILE_DIR
+            ? path.join(process.env.WIKI_BENCH_CPU_PROFILE_DIR, name)
+            : undefined,
+        ),
+        ...(countReads
+          ? [
+              "--import",
+              fileURLToPath(new URL("./lib/wiki-compile-bench-reads.mjs", import.meta.url)),
+            ]
+          : []),
+        path.resolve(entry),
+        "gateway",
+        "run",
+        "--port",
+        String(port),
+      ],
       {
-        env: createGatewayBenchEnv(home, configPath, {}),
-        stdio: ["ignore", "pipe", "pipe"],
+        env: createGatewayBenchEnv(home, configPath, { caseEnv: { WIKI_BENCH_VAULT: vault } }),
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
         detached: true,
       },
     );
+    assert(child.stdout && child.stderr, "Gateway stdout and stderr must be piped");
     let logs = "";
     child.stdout.on("data", (chunk) => {
       logs += String(chunk);
@@ -165,6 +256,12 @@ try {
     while (Date.now() < deadline) {
       if (child.exitCode !== null) {
         throw new Error(`${name} Gateway exited: ${logs.slice(-6000)}`);
+      }
+      // Main exposes a bootstrap socket before optional plugin methods/services attach.
+      // The benchmark enables startup tracing explicitly; wait for the full service phase.
+      if (!logs.includes("startup trace: sidecars.ready")) {
+        await delay(250);
+        continue;
       }
       const probe = createGatewayWsClient({ url: `ws://127.0.0.1:${port}` });
       try {
@@ -214,11 +311,16 @@ try {
         path.join(arm.vault, "entities", "change.md"),
         `---\npageType: entity\nid: entity.change\ntitle: Changed ${sample}\nquestions:\n  - Question ${sample}?\n---\n# Changed ${sample}\n\n[Source](../sources/page-0.md)\n`,
       );
+      if (countReads) {
+        await collectReads(arm.child);
+      }
       const started = performance.now();
       assert(arm.client);
       const response = await arm.client.request("wiki.compile", {}, 300_000);
       assert(response.ok, JSON.stringify(response.error));
       const ms = performance.now() - started;
+      const reads = countReads ? await collectReads(arm.child) : {};
+      const sourceGeneration = await verifySourceGeneration(arm.vault);
       assert(
         response.payload &&
           typeof response.payload === "object" &&
@@ -234,9 +336,17 @@ try {
         digest,
         pageCounts: response.payload.pageCounts,
         load: loadavg(),
+        reads,
+        sourceGeneration,
       });
       console.log(JSON.stringify(evidence.warm.at(-1)));
     }
+    const baselineReads = evidence.warm.at(-2)?.reads["sources/page-1.md"];
+    const candidateReads = evidence.warm.at(-1)?.reads["sources/page-1.md"];
+    assert(
+      !countReads || (baselineReads && candidateReads && candidateReads < baselineReads),
+      "Candidate must reduce unchanged-page reads through the real compile RPC",
+    );
     assert.deepEqual(counts[0], counts[1], `Page counts differ in sample ${sample}`);
     assert.equal(hashes[0], hashes[1], `Generated content differs in sample ${sample}`);
   }
@@ -244,6 +354,9 @@ try {
 } finally {
   for (const arm of arms) {
     arm.client?.close();
+    if (arm.child.connected) {
+      arm.child.disconnect();
+    }
     await stopChild(arm.child, { teardownGraceMs: 30_000 });
     await fs.writeFile(`${output}.${arm.name}.log`, arm.log());
   }
