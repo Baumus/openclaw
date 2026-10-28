@@ -1,4 +1,4 @@
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -55,6 +55,21 @@ vi.mock("./compile.js", async (importOriginal) => {
 
 const { createVault: createCliVault } = createMemoryWikiTestHarness();
 const execFileAsync = promisify(execFile);
+// A writer lets regressed FIFO reads finish; each caller settles it in finally.
+function startFifoWriter(filePath: string, contents = "") {
+  const writer = execFileAsync(process.execPath, [
+    "-e",
+    "require('node:fs').writeFileSync(process.argv[1], process.argv[2])",
+    filePath,
+    contents,
+  ]);
+  const settled = writer.catch(() => undefined);
+  return async () => {
+    writer.child.kill("SIGKILL");
+    await settled;
+  };
+}
+
 let stdoutWriteMock: ReturnType<typeof vi.fn>;
 const synthesisArgs = ["apply", "synthesis", "CLI Alpha", "--body", "Alpha from CLI."];
 const assistantReply = "Noted. I will keep travel options close to the airport.";
@@ -230,20 +245,7 @@ describe("memory-wiki cli", () => {
       if (symlink) {
         await fs.symlink(fifo, input);
       }
-      // An EOF writer lets a regressed blocking read fail without hanging the worker.
-      const writer = spawn(
-        process.execPath,
-        [
-          "-e",
-          "const fs = require('node:fs'); fs.open(process.argv[1], 'w', (error, fd) => { if (error) throw error; fs.closeSync(fd); });",
-          fifo,
-        ],
-        { stdio: "ignore" },
-      );
-      const exited = new Promise<void>((resolve, reject) => {
-        writer.once("error", reject);
-        writer.once("close", () => resolve());
-      });
+      const stopWriter = startFifoWriter(fifo);
       try {
         await expect(runWiki(config, [...args, "--body-file", input])).rejects.toThrow(
           `wiki apply synthesis --body-file could not be read: ${input}. path must be a regular file. Supply a regular UTF-8 file (or use --body), then retry.`,
@@ -254,8 +256,7 @@ describe("memory-wiki cli", () => {
           expect((await fs.lstat(input)).isSymbolicLink()).toBe(true);
         }
       } finally {
-        writer.kill("SIGKILL");
-        await exited;
+        await stopWriter();
       }
     },
   );
@@ -507,33 +508,23 @@ describe("memory-wiki cli", () => {
     );
   });
 
-  it("accepts released Gateway responses that do not expose snapshot metadata", async () => {
-    const { config } = await createBridgeCliVault();
-    const { snapshot: _snapshot, ...legacyStatus } = createGatewayStatus(config);
-    const legacyReport = { healthy: true, warningCount: 0, status: legacyStatus, fixes: [] };
-    callGatewayFromCliMock.mockResolvedValueOnce(legacyStatus).mockResolvedValueOnce(legacyReport);
-    expect(JSON.parse(await runWiki(config, ["status", "--json"]))).toEqual(legacyStatus);
-    expect(JSON.parse(await runWiki(config, ["doctor", "--json"]))).toEqual(legacyReport);
-  });
-
-  it("accepts unknown snapshot counts without reporting an empty wiki", async () => {
+  it.each(["legacy", "unknown"])("accepts %s Gateway status and doctor responses", async (mode) => {
     const { config } = await createBridgeCliVault();
     const status = createGatewayStatus(config);
-    status.snapshot = { state: "unavailable", compiledAt: null };
-    status.bridgePublicArtifactCount = null;
-    for (const key of Object.keys(status.pageCounts) as Array<keyof typeof status.pageCounts>) {
-      status.pageCounts[key] = null;
+    status.snapshot = mode === "legacy" ? undefined : { state: "unavailable", compiledAt: null };
+    if (mode === "unknown") {
+      status.bridgePublicArtifactCount = null;
+      for (const key of ["source", "entity", "concept", "synthesis", "report"] as const) {
+        status.pageCounts[key] = null;
+      }
+      for (const key of ["native", "bridge", "bridgeEvents", "unsafeLocal", "other"] as const) {
+        status.sourceCounts[key] = null;
+      }
     }
-    for (const key of Object.keys(status.sourceCounts) as Array<keyof typeof status.sourceCounts>) {
-      status.sourceCounts[key] = null;
-    }
-    callGatewayFromCliMock.mockResolvedValueOnce(status);
-    const output = await runWiki(config, ["status", "--json"]);
-    expect(JSON.parse(output)).toMatchObject({
-      snapshot: { state: "unavailable" },
-      pageCounts: { source: null },
-      bridgePublicArtifactCount: null,
-    });
+    const report = { healthy: true, warningCount: 0, status, fixes: [] };
+    callGatewayFromCliMock.mockResolvedValueOnce(status).mockResolvedValueOnce(report);
+    expect(JSON.parse(await runWiki(config, ["status", "--json"]))).toEqual(status);
+    expect(JSON.parse(await runWiki(config, ["doctor", "--json"]))).toEqual(report);
   });
 
   it("truncates gateway status text output without splitting surrogate pairs", async () => {
@@ -682,21 +673,13 @@ describe("memory-wiki cli", () => {
         await fs.unlink(inputPath);
       }
       execFileSync("mkfifo", [inputPath]);
-      // A writer lets the old blocking reader finish, so RED cannot strand a worker.
-      const writer = execFileAsync(process.execPath, [
-        "-e",
-        "require('node:fs').writeFileSync(process.argv[1], process.argv[2])",
-        inputPath,
-        contents,
-      ]);
-      const writerSettled = writer.catch(() => undefined);
+      const stopWriter = startFifoWriter(inputPath, contents);
       try {
         await expect(runChatGptImport(config, exportDir, "--dry-run")).rejects.toThrow(
           "path must be a regular file",
         );
       } finally {
-        writer.child.kill();
-        await writerSettled;
+        await stopWriter();
       }
       expect((await fs.lstat(inputPath)).isFIFO()).toBe(true);
       await fs.unlink(inputPath);

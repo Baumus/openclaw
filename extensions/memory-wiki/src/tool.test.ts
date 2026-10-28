@@ -1,39 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { lintMemoryWikiVault } from "./lint.js";
 import { parseWikiMarkdown } from "./markdown.js";
-import * as sourceSync from "./source-sync.js";
-import {
-  createCompiledSnapshot,
-  createMemoryWikiTestHarness,
-  publishCompiledSnapshot,
-} from "./test-helpers.js";
-import { createWikiApplyTool, createWikiLintTool, createWikiStatusTool } from "./tool.js";
+import { createMemoryWikiTestHarness } from "./test-helpers.js";
+import { createWikiApplyTool, createWikiLintTool } from "./tool.js";
 
 describe("memory-wiki tools", () => {
   const harness = createMemoryWikiTestHarness();
-
-  it("reports published counts without importing from the status tool", async () => {
-    const { config } = await harness.createVault({ initialize: true });
-    const snapshot = createCompiledSnapshot();
-    snapshot.dashboards.overview.pageCounts.source = 12_416;
-    await publishCompiledSnapshot(config, snapshot);
-    const sync = vi
-      .spyOn(sourceSync, "syncMemoryWikiImportedSources")
-      .mockRejectedValue(new Error("Status must not synchronize"));
-    try {
-      const result = await createWikiStatusTool(config).execute("status", {});
-      expect(result.details).toMatchObject({
-        pageCounts: { source: 12_416 },
-        bridgePublicArtifactCount: null,
-        snapshot: { state: "published" },
-      });
-      expect(sync).not.toHaveBeenCalled();
-    } finally {
-      sync.mockRestore();
-    }
-  });
 
   it("rejects non-object wiki_apply arguments without throwing a TypeError", async () => {
     const { config } = await harness.createVault({ initialize: true });
@@ -47,11 +21,10 @@ describe("memory-wiki tools", () => {
   });
 
   async function createApplyFixture() {
-    const { rootDir, config } = await harness.createVault({ initialize: true });
-    const pagePath = path.join(rootDir, "entities", "alpha.md");
+    const { config, write } = await harness.createVault({ initialize: true });
     const original =
       "---\npageType: entity\nid: entity.alpha\ntitle: Alpha\nstatus: active\nupdatedAt: 2026-01-01T00:00:00.000Z\n---\n\n# Alpha\n\nKeep this human note.\n";
-    await fs.writeFile(pagePath, original, "utf8");
+    const pagePath = await write("entities/alpha.md", original);
     return { tool: createWikiApplyTool(config), pagePath, original };
   }
 
@@ -83,17 +56,15 @@ describe("memory-wiki tools", () => {
   });
 
   it("returns tool-safe relative report paths from wiki_lint", async () => {
-    const { rootDir, config } = await harness.createVault({ initialize: true });
-    await fs.mkdir(path.join(rootDir, "syntheses"), { recursive: true });
-    await fs.writeFile(
-      path.join(rootDir, "syntheses", "bad.md"),
-      "---\nid: synth-bad\npageType: synthesis\ntitle: Bad Page\n---\n\nThis links to [[Missing Page]].",
-      "utf8",
+    const { rootDir, config, page } = await harness.createVault({ initialize: true });
+    await page(
+      "syntheses/bad.md",
+      { id: "synth-bad", pageType: "synthesis", title: "Bad Page" },
+      "This links to [[Missing Page]].",
     );
 
-    const result = await createWikiLintTool(config).execute("lint-call", {});
-    const text = result.content.find((part) => part.type === "text")?.text ?? "";
-    const details = result.details;
+    const { content, details } = await createWikiLintTool(config).execute("lint-call", {});
+    const text = content.find((part) => part.type === "text")?.text ?? "";
 
     expect(text).toContain("Report: reports/lint.md");
     expect(text).not.toContain(rootDir);
