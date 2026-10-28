@@ -4,7 +4,7 @@ import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js"
 import { assertGatewayServiceUpdateCurrent } from "../../daemon/service-update-authority.js";
 import { createUpdateRun, recordUpdateRunVerification } from "../../infra/update-run-ledger.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
-import { captureCurrentCoreRecoveryRisk } from "../update-cli/update-command-current-core-recovery.js";
+import { captureRestorationRisk } from "../update-cli/update-command-current-core-recovery.test-support.js";
 import { runGatewayServiceUpdateCommand } from "./update-executor.js";
 
 const mocks = vi.hoisted(() => ({ root: "/fixture-current-root", assertLease: vi.fn() }));
@@ -31,7 +31,7 @@ it.each(["healthy", "late-risk", "wrong-run", "install-refused", "malformed"] as
   async (scenario) => {
     const env = { OPENCLAW_STATE_DIR: dirs.make("receiver-risk-") };
     const run = createUpdateRun({ trigger: "cli" }, { env });
-    const restriction = captureCurrentCoreRecoveryRisk({ ...run, env });
+    const restriction = await captureRestorationRisk({ ...run, env });
     const input = {
       action: scenario === "install-refused" ? "install" : "restart",
       targetRoot: mocks.root,

@@ -21,7 +21,7 @@ import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import * as execCommands from "../../process/exec.js";
 import { runUtf8CommandWithTimeout } from "../../process/exec.js";
 import { isPidAlive } from "../../shared/pid-alive.js";
-import { captureCurrentCoreRecoveryRisk } from "./update-command-current-core-recovery.js";
+import { captureRestorationRisk } from "./update-command-current-core-recovery.test-support.js";
 import { updateExecutorNativeEntrypoints } from "./update-command-executor-native-runtime.test-support.js";
 import {
   withUpdateCommandExecutorChild,
@@ -529,7 +529,7 @@ it.skipIf(process.platform === "win32").each([false, true])(
     vi.spyOn(tempRoot, "resolvePreferredOpenClawTmpDir").mockReturnValue(control);
     const env = { ...process.env, OPENCLAW_STATE_DIR: path.join(scratch, "state") };
     const row = createUpdateRun({ trigger: "cli" }, { env });
-    const restriction = captureCurrentCoreRecoveryRisk({ ...row, env });
+    const restriction = await captureRestorationRisk({ ...row, env });
     const effect = path.join(scratch, "effect");
     const proceed = path.join(scratch, "proceed");
     const receiver = [

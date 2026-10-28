@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { createUpdateRun, recordUpdateRunVerification } from "../../infra/update-run-ledger.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
-import { captureCurrentCoreRecoveryRisk } from "./update-command-current-core-recovery.js";
+import { captureRestorationRisk } from "./update-command-current-core-recovery.test-support.js";
 import { runUpdatedInstallGatewayCommand } from "./update-command-service-command.js";
 const mocks = vi.hoisted(() => ({ entry: vi.fn(), command: vi.fn(), child: vi.fn() }));
 vi.mock("../../daemon/gateway-entrypoint.js", async (importOriginal) => ({
@@ -34,7 +34,7 @@ it.each([
 ] as const)("refuses unsafe current-core activation across %s await", async (scenario) => {
   const env = { OPENCLAW_STATE_DIR: dirs.make("command-risk-") };
   const run = createUpdateRun({ trigger: "cli" }, { env });
-  const risk = captureCurrentCoreRecoveryRisk({ ...run, env });
+  const risk = await captureRestorationRisk({ ...run, env });
   const publish = () =>
     recordUpdateRunVerification(
       run.runId,

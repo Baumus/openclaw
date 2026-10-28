@@ -24,7 +24,7 @@ export const currentCoreRecoveryRiskSchema = z.strictObject({
   }),
 });
 export type CurrentCoreRecoveryRisk = z.infer<typeof currentCoreRecoveryRiskSchema>;
-export function captureCurrentCoreRecoveryRisk(
+function captureCurrentCoreRecoveryRisk(
   run: NonNullable<UpdateCommandOptions["run"]>,
 ): CurrentCoreRecoveryRisk {
   const path = resolveOpenClawStateSqlitePath(run.env);

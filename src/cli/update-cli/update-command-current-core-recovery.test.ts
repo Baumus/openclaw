@@ -10,9 +10,9 @@ import { createUpdateRun, recordUpdateRunVerification } from "../../infra/update
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import {
   isCurrentCoreFailureRecoveryEligible,
-  captureCurrentCoreRecoveryRisk,
   assertCurrentCoreRecoveryRisk,
 } from "./update-command-current-core-recovery.js";
+import { captureRestorationRisk } from "./update-command-current-core-recovery.test-support.js";
 import { createPostUpdateRepairFixture } from "./update-command-post-update-repair.test-support.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
@@ -111,7 +111,7 @@ it.each([
 ] as const)("live risk restriction at native authority: %s", async (scenario) => {
   const env = { OPENCLAW_STATE_DIR: dirs.make("live-risk-") };
   const run = createUpdateRun({ trigger: "cli" }, { env });
-  const restriction = captureCurrentCoreRecoveryRisk({ ...run, env });
+  const restriction = await captureRestorationRisk({ ...run, env });
   const risk = () =>
     recordUpdateRunVerification(
       run.runId,
