@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileMemoryWikiVault, refreshMemoryWikiIndexesAfterImport } from "./compile.js";
 import { loadMemoryWikiCompiledCache, readMemoryWikiDashboardState } from "./compiled-cache.js";
 import type { MemoryWikiPluginConfig } from "./config.js";
+import { loadMemoryWikiVaultIdentity, loadMemoryWikiValidatedVaultIdentity } from "./log.js";
 import { extractWikiLinks } from "./markdown-links.js";
 import { renderWikiMarkdown } from "./markdown.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
@@ -15,6 +16,104 @@ const createVault = (config?: MemoryWikiPluginConfig) =>
 
 describe("compileMemoryWikiVault", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("preserves title ties, invalid pages, and import projections after generated writes", async () => {
+    const { rootDir, config } = await createVault();
+    const stablePath = path.join(rootDir, "sources", "a-stable.md");
+    const changedPath = path.join(rootDir, "sources", "z-changed.md");
+    for (const [target, id] of [
+      [stablePath, "stable"],
+      [changedPath, "changed"],
+    ] as const) {
+      await fs.writeFile(
+        target,
+        renderWikiMarkdown({
+          frontmatter: {
+            pageType: "source",
+            id,
+            title: "Same title",
+            sourceType: "chatgpt-export",
+          },
+          body: `# Same title\n\n## Auto Digest\n- First user line: ${id} insight\n`,
+        }),
+      );
+    }
+    await compileMemoryWikiVault(config);
+    await fs.writeFile(
+      path.join(rootDir, "entities", "new.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.new",
+          title: "New entity",
+          sourceIds: ["changed"],
+          questions: ["A new question?"],
+        },
+        body: "# New entity\n",
+      }),
+    );
+    const brokenPath = path.join(rootDir, "concepts", "broken.md");
+    await fs.writeFile(brokenPath, "---\n- invalid mapping\n---\n# Broken\n");
+
+    const result = await compileMemoryWikiVault(config);
+    expect(result.updatedFiles).not.toContain(stablePath);
+    expect(result.updatedFiles).toContain(changedPath);
+    expect(result.frontmatterErrors).toEqual([
+      expect.objectContaining({ relativePath: "concepts/broken.md" }),
+    ]);
+    expect(
+      result.pages.filter((page) => page.title === "Same title").map((page) => page.relativePath),
+    ).toEqual(["sources/a-stable.md", "sources/z-changed.md"]);
+    const snapshot = expectDefined(await loadMemoryWikiCompiledCache(config), "compiled cache");
+    const identity = await loadMemoryWikiVaultIdentity(rootDir);
+    expect(identity.compiledCachePublicationId).not.toBeNull();
+    expect(await loadMemoryWikiValidatedVaultIdentity(rootDir)).toEqual(identity);
+    expect(JSON.stringify(snapshot.dashboards.importInsights)).toContain("stable insight");
+    expect(JSON.stringify(snapshot.dashboards.importInsights)).toContain("changed insight");
+    await expect(
+      fs.readFile(path.join(rootDir, "reports", "open-questions.md"), "utf8"),
+    ).resolves.toContain("A new question?");
+  });
+
+  it("keeps reused source fingerprints tied to scanned bytes during dashboard writes", async () => {
+    const {
+      rootDir,
+      config,
+      page: writePage,
+    } = await createVault({ render: { createBacklinks: false } });
+    const sourcePath = path.join(rootDir, "sources", "stable.md");
+    await fs.writeFile(sourcePath, "# Before\n");
+    await compileMemoryWikiVault(config);
+    await writePage("entities/new.md", {
+      pageType: "entity",
+      title: "New",
+      questions: ["New question?"],
+    });
+    const realReadFile = fs.readFile.bind(fs);
+    let reportReads = 0;
+    vi.spyOn(fs, "readFile").mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+      if (args[0] === path.join(rootDir, "reports", "open-questions.md")) {
+        reportReads++;
+        if (reportReads === 2) {
+          await fs.writeFile(sourcePath, "# External edit\n");
+        }
+      }
+      return realReadFile(...args);
+    });
+    await compileMemoryWikiVault(config);
+    expect(reportReads).toBeGreaterThanOrEqual(2);
+    expect(
+      (await loadMemoryWikiCompiledCache(config))?.digest.pages.find(
+        (page) => page.path === "sources/stable.md",
+      )?.title,
+    ).toBe("Before");
+    await expect(fs.readFile(sourcePath, "utf8")).resolves.toBe("# External edit\n");
+    // A later activation rejects the now-stale publication instead of treating
+    // the external edit as one of the bytes that produced its cached snapshot.
+    expect(
+      (await loadMemoryWikiValidatedVaultIdentity(rootDir)).compiledCachePublicationId,
+    ).toBeNull();
+  });
 
   it("keeps changed imports compile-required when auto-compile is disabled", async () => {
     const { rootDir, config, read } = await createVault({

@@ -35,6 +35,7 @@ const repositoryScriptEntries = [
   "test/scripts/fixtures/native-profile-census.mjs!",
   // Their source headers document standalone benchmark and measurement commands.
   "scripts/bench-duplicate-paragraphs.mts!",
+  "scripts/bench-memory-wiki-compile.mts!",
   "scripts/perf/anthropic-request-construction.ts!",
   "scripts/perf/auth-file-watch-events-measure.ts!",
   "scripts/perf/completion-payload-bytes-measure.ts!",

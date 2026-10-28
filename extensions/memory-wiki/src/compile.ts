@@ -414,19 +414,7 @@ type CompileMemoryWikiOptions = {
   signal?: AbortSignal;
 };
 
-async function readPageSummaries(rootDir: string, signal?: AbortSignal) {
-  const filePaths = (
-    await Promise.all(
-      WIKI_PAGE_GROUPS.map(async (group) =>
-        (await listMemoryWikiPagePaths(rootDir, group.dir)).toSorted((left, right) =>
-          left.localeCompare(right),
-        ),
-      ),
-    )
-  ).flat();
-  signal?.throwIfAborted();
-  const sourceDigests: Array<[string, Buffer]> = [];
-
+async function readPageSummaryEntries(rootDir: string, filePaths: string[], signal?: AbortSignal) {
   const readResult = await runTasksWithConcurrency({
     tasks: filePaths.map((relativePath) => async () => {
       signal?.throwIfAborted();
@@ -436,17 +424,19 @@ async function readPageSummaries(rootDir: string, signal?: AbortSignal) {
         `read wiki page ${absolutePath}`,
       );
       signal?.throwIfAborted();
-      sourceDigests.push([relativePath, createHash("sha256").update(bytes).digest()]);
       // Large imported pages are parsed off the request path, but the compiler
       // still yields between pages so background recovery cannot starve Gateway ticks.
       await yieldToEventLoop();
       signal?.throwIfAborted();
+      const contentDigest = createHash("sha256").update(bytes).digest();
       const scan = scanWikiPageSummary({ absolutePath, relativePath, raw: bytes.toString("utf8") });
       if (scan.status !== "valid") {
-        return { scan, importInsight: null, overviewItem: null };
+        return { relativePath, contentDigest, scan, importInsight: null, overviewItem: null };
       }
       const { parsed, ...summaryScan } = scan;
       return {
+        relativePath,
+        contentDigest,
         scan: summaryScan,
         importInsight: projectMemoryWikiImportInsight(scan.page, parsed),
         overviewItem: projectMemoryWikiOverviewItem(scan.page, parsed.body),
@@ -460,21 +450,73 @@ async function readPageSummaries(rootDir: string, signal?: AbortSignal) {
   }
   signal?.throwIfAborted();
 
+  return readResult.results;
+}
+
+type PageSummaryEntry = Awaited<ReturnType<typeof readPageSummaryEntries>>[number];
+
+function summarizePageEntries(entries: PageSummaryEntry[]) {
   return {
-    sourceGeneration: hashMemoryWikiVaultSources(sourceDigests),
-    pages: readResult.results
+    entries,
+    sourceGeneration: hashMemoryWikiVaultSources(
+      entries.map(({ relativePath, contentDigest }) => [relativePath, contentDigest]),
+    ),
+    pages: entries
       .flatMap(({ scan }) => (scan.status === "valid" ? [scan.page] : []))
       .toSorted((left, right) => left.title.localeCompare(right.title)),
-    frontmatterErrors: readResult.results.flatMap(({ scan }) =>
+    frontmatterErrors: entries.flatMap(({ scan }) =>
       scan.status === "invalid-frontmatter" ? [scan.error] : [],
     ),
-    importInsights: readResult.results.flatMap(({ importInsight }) =>
-      importInsight ? [importInsight] : [],
-    ),
-    overviewItems: readResult.results.flatMap(({ overviewItem }) =>
-      overviewItem ? [overviewItem] : [],
-    ),
+    importInsights: entries.flatMap(({ importInsight }) => (importInsight ? [importInsight] : [])),
+    overviewItems: entries.flatMap(({ overviewItem }) => (overviewItem ? [overviewItem] : [])),
   };
+}
+
+async function readPageSummaries(rootDir: string, signal?: AbortSignal) {
+  const filePaths = (
+    await Promise.all(
+      WIKI_PAGE_GROUPS.map(async (group) =>
+        (await listMemoryWikiPagePaths(rootDir, group.dir)).toSorted((left, right) =>
+          left.localeCompare(right),
+        ),
+      ),
+    )
+  ).flat();
+  signal?.throwIfAborted();
+  return summarizePageEntries(await readPageSummaryEntries(rootDir, filePaths, signal));
+}
+
+async function refreshPageSummaries(
+  rootDir: string,
+  previous: ReturnType<typeof summarizePageEntries>,
+  updatedFiles: string[],
+  signal?: AbortSignal,
+) {
+  const replacements = await readPageSummaryEntries(
+    rootDir,
+    [
+      ...new Set(
+        updatedFiles.map((file) => path.relative(rootDir, file).split(path.sep).join("/")),
+      ),
+    ],
+    signal,
+  );
+  const entries = new Map(previous.entries.map((entry) => [entry.relativePath, entry]));
+  for (const entry of replacements) {
+    entries.set(entry.relativePath, entry);
+  }
+  // Keep discovery order, including title ties and projection/error ordering.
+  // Carry each scanned byte digest with its projection so publication keeps
+  // identifying the exact source bytes used, including ignored/invalid pages.
+  const groupOrder = (relativePath: string) =>
+    WIKI_PAGE_GROUPS.findIndex((group) => relativePath.startsWith(`${group.dir}/`));
+  return summarizePageEntries(
+    [...entries.values()].toSorted(
+      (left, right) =>
+        groupOrder(left.relativePath) - groupOrder(right.relativePath) ||
+        left.relativePath.localeCompare(right.relativePath),
+    ),
+  );
 }
 
 function formatPageLink(
@@ -872,7 +914,7 @@ async function compileMemoryWikiVaultUnlocked(
           ...(options?.signal ? { signal: options.signal } : {}),
         });
   if (updatedFiles.length > 0) {
-    scan = await readPageSummaries(rootDir, options?.signal);
+    scan = await refreshPageSummaries(rootDir, scan, updatedFiles, options?.signal);
     pages = scan.pages;
   }
   const dashboardUpdatedFiles = await refreshDashboardPages({
@@ -883,7 +925,7 @@ async function compileMemoryWikiVaultUnlocked(
   });
   updatedFiles.push(...dashboardUpdatedFiles);
   if (dashboardUpdatedFiles.length > 0) {
-    scan = await readPageSummaries(rootDir, options?.signal);
+    scan = await refreshPageSummaries(rootDir, scan, dashboardUpdatedFiles, options?.signal);
     pages = scan.pages;
   }
   const compiledSnapshot = buildCompiledCacheSnapshot(scan);
