@@ -11,7 +11,7 @@ import {
   readActiveOpenClawAgentDatabaseLeasesReadOnly,
   type OpenClawAgentDatabaseWorkerLeaseReceipt,
 } from "./openclaw-agent-db-lease.js";
-import { OPENCLAW_AGENT_FTS_SCHEMAS } from "./openclaw-agent-fts-schema.js";
+import { AGENT_FTS_SCHEMAS } from "./openclaw-agent-fts-schema.js";
 import { runOpenClawStateWriteTransaction } from "./openclaw-state-db.js";
 
 /** The native worker repairs only owned FTS under its existing shared write fence. */
@@ -32,7 +32,7 @@ export function repairAgentDatabaseStartupFts(context: {
     !classifySqliteFtsIntegrityFindings(
       check.database,
       readSqliteIntegrityFindings(check.database),
-      OPENCLAW_AGENT_FTS_SCHEMAS,
+      AGENT_FTS_SCHEMAS,
     )
   ) {
     return false;
@@ -66,7 +66,7 @@ export function repairAgentDatabaseStartupFts(context: {
       admit("begin");
       const changes = repairDoctorSqliteIndexCorruption(check.database, check.databaseLabel, {
         label: "agent " + receipt.agentId,
-        ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS,
+        ftsSchemas: AGENT_FTS_SCHEMAS,
         ftsOnly: true,
         assertCurrent: () => admit("check"),
         describeRepair: (indexes) =>

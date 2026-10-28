@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import { OPENCLAW_AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
+import { AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
 import { installSqliteFtsTokenizerMismatch } from "./sqlite-index-corruption.test-support.js";
 import {
   discoverUpdateStateSchemaInspectionInProcess,
@@ -26,7 +26,7 @@ it.each(["candidate", "backup"] as const)(
     await fs.mkdir(targetStateDir);
     {
       using db = new DatabaseSync(sourcePath);
-      const ddl = OPENCLAW_AGENT_FTS_SCHEMAS.join("\n").match(
+      const ddl = AGENT_FTS_SCHEMAS.join("\n").match(
         /CREATE VIRTUAL TABLE IF NOT EXISTS session_transcript_fts[^;]+;/u,
       )?.[0];
       if (!ddl) {

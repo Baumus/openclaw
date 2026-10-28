@@ -2,7 +2,4 @@ import { getMemoryFtsSchemaSqlVariants } from "../../packages/memory-host-sdk/sr
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "./openclaw-agent-schema.js";
 
 /** Static agent DDL and the memory owner's lazily installed FTS definitions. */
-export const OPENCLAW_AGENT_FTS_SCHEMAS = [
-  OPENCLAW_AGENT_SCHEMA_SQL,
-  ...getMemoryFtsSchemaSqlVariants(),
-];
+export const AGENT_FTS_SCHEMAS = [OPENCLAW_AGENT_SCHEMA_SQL, ...getMemoryFtsSchemaSqlVariants()];

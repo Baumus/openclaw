@@ -31,7 +31,7 @@ import {
   resolveOpenClawAgentSqlitePath,
   type OpenClawAgentDatabaseOptions,
 } from "../state/openclaw-agent-db.js";
-import { OPENCLAW_AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
+import { AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "../state/openclaw-agent-schema.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../state/openclaw-state-db.js";
 import type { OpenClawStateLeaseContext } from "../state/openclaw-state-lease.js";
@@ -324,7 +324,7 @@ function inspectSqliteForRecovery(
           classifySqliteFtsIntegrityFindings(
             database,
             readSqliteIntegrityFindings(database),
-            OPENCLAW_AGENT_FTS_SCHEMAS,
+            AGENT_FTS_SCHEMAS,
           ),
         );
       } catch {

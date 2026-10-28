@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { expectDefined } from "@openclaw/normalization-core/expect";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import { OPENCLAW_AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
+import { AGENT_FTS_SCHEMAS } from "../state/openclaw-agent-fts-schema.js";
 import {
   corruptSqliteIndexKey,
   installSqliteFtsTokenizerMismatch,
@@ -21,7 +21,7 @@ function fixture() {
   {
     using db = new DatabaseSync(pathname);
     // Extract every canonical virtual table, including the lazy memory variants.
-    const schemas = OPENCLAW_AGENT_FTS_SCHEMAS.join("\n");
+    const schemas = AGENT_FTS_SCHEMAS.join("\n");
     for (const match of schemas.matchAll(/CREATE VIRTUAL TABLE[^;]+;/gu)) {
       if (!match[0].includes("content =")) {
         db.exec(match[0]);
@@ -48,13 +48,13 @@ it("backs up and rebuilds only canonical FTS indexes without changing content", 
     classifySqliteFtsIntegrityFindings(
       db,
       findings.map((row) => row.integrity_check),
-      OPENCLAW_AGENT_FTS_SCHEMAS,
+      AGENT_FTS_SCHEMAS,
     ),
   ).toEqual(["memory_index_chunks_fts", "session_transcript_fts"]);
   const result = repairDoctorSqliteIndexCorruption(db, pathname, {
     label: "agent main",
     assertCurrent: () => {},
-    ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS,
+    ftsSchemas: AGENT_FTS_SCHEMAS,
   });
   const backupPath = expectDefined(result[0], "backup diagnostic").replace(
     "Saved pre-repair SQLite backup: ",
@@ -97,9 +97,7 @@ it.each(["unknown", "drifted", "mixed"])(
         "UPDATE sqlite_schema SET sql=replace(sql, 'text,', 'other,') WHERE name='session_transcript_fts'",
       ).run();
     }
-    expect(
-      classifySqliteFtsIntegrityFindings(db, findings, OPENCLAW_AGENT_FTS_SCHEMAS),
-    ).toBeUndefined();
+    expect(classifySqliteFtsIntegrityFindings(db, findings, AGENT_FTS_SCHEMAS)).toBeUndefined();
   },
 );
 
@@ -110,7 +108,7 @@ it("rolls an FTS rebuild back when commit authority is lost", () => {
   const backup = vi.fn();
   expect(() =>
     repairSqliteIndexCorruption(db, pathname, {
-      ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS,
+      ftsSchemas: AGENT_FTS_SCHEMAS,
       backup,
       assertCurrent: () => {
         throw new Error("maintenance lost");
@@ -148,7 +146,7 @@ it.each(["unowned", "mixed"] as const)(
     const backup = vi.fn();
     expect(() =>
       repairSqliteIndexCorruption(db, pathname, {
-        ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS,
+        ftsSchemas: AGENT_FTS_SCHEMAS,
         backup,
         assertCurrent: () => {},
       }),
@@ -191,7 +189,7 @@ it.each(["owned", "unowned", "unopted", "mixed", "foreign-key"] as const)(
       sourcePath: pathname,
       targetPath,
       preserveRowIds: true,
-      ...(kind === "unopted" ? {} : { ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS }),
+      ...(kind === "unopted" ? {} : { ftsSchemas: AGENT_FTS_SCHEMAS }),
     });
     if (kind !== "owned") {
       await expect(snapshot).rejects.toThrow(
