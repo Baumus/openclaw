@@ -182,8 +182,7 @@ export function registerMemoryWikiGatewayMethods(params: {
   };
 
   registerResultMethod("wiki.status", READ_SCOPE, async (requestParams) => {
-    const { appConfig, config, signal } = resolveRequestContext(requestParams);
-    await syncMemoryWikiImportedSources({ config, appConfig, ...(signal ? { signal } : {}) });
+    const { appConfig, config } = resolveRequestContext(requestParams);
     return await resolveMemoryWikiStatus(config, { appConfig });
   });
 
@@ -211,8 +210,7 @@ export function registerMemoryWikiGatewayMethods(params: {
   });
 
   registerResultMethod("wiki.doctor", READ_SCOPE, async (requestParams) => {
-    const { appConfig, config, signal } = resolveRequestContext(requestParams);
-    await syncMemoryWikiImportedSources({ config, appConfig, ...(signal ? { signal } : {}) });
+    const { appConfig, config } = resolveRequestContext(requestParams);
     const status = await resolveMemoryWikiStatus(config, { appConfig });
     return buildMemoryWikiDoctorReport(status);
   });

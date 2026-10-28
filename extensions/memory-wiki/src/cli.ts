@@ -211,9 +211,19 @@ function isMemoryWikiStatus(value: unknown): value is MemoryWikiStatus {
     typeof unsafeLocal.allowPrivateMemoryCoreAccess === "boolean" &&
     typeof unsafeLocal.pathCount === "number" &&
     isRecord(pageCounts) &&
-    hasNumberFields(pageCounts, ["source", "entity", "concept", "synthesis", "report"]) &&
+    ["source", "entity", "concept", "synthesis", "report"].every(
+      (key) => pageCounts[key] === null || typeof pageCounts[key] === "number",
+    ) &&
     isRecord(sourceCounts) &&
-    hasNumberFields(sourceCounts, ["native", "bridge", "bridgeEvents", "unsafeLocal", "other"]) &&
+    ["native", "bridge", "bridgeEvents", "unsafeLocal", "other"].every(
+      (key) => sourceCounts[key] === null || typeof sourceCounts[key] === "number",
+    ) &&
+    (value.snapshot === undefined ||
+      (isRecord(value.snapshot) &&
+        typeof value.snapshot.state === "string" &&
+        ["published", "unavailable", "failed"].includes(value.snapshot.state) &&
+        (value.snapshot.compiledAt === null ||
+          isBoundedGatewayString(value.snapshot.compiledAt)))) &&
     isWarningList(value.warnings)
   );
 }
@@ -431,7 +441,6 @@ async function runWikiStatus(params: {
   const routeThroughGateway = shouldRouteBridgeRuntimeThroughGateway(params.config);
   let localStatus: MemoryWikiStatus | undefined;
   if (!routeThroughGateway) {
-    await syncMemoryWikiImportedSources({ config: params.config, appConfig: params.appConfig });
     localStatus = await resolveMemoryWikiStatus(params.config, { appConfig: params.appConfig });
   }
   const format = routeThroughGateway ? formatGatewayJsonOrText : formatJsonOrText;

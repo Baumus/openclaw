@@ -1,24 +1,24 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { runTasksWithConcurrency } from "openclaw/plugin-sdk/concurrency-runtime";
-import { listActiveMemoryPublicArtifacts } from "openclaw/plugin-sdk/memory-host-core";
 import { pathExists } from "openclaw/plugin-sdk/security-runtime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../api.js";
-import { listMemoryWikiPagePaths } from "./bounded-walk.js";
-import { filterMemoryWikiBridgeArtifacts, resolveMemoryWikiVaultAgentId } from "./bridge.js";
+import { resolveMemoryWikiVaultAgentId } from "./bridge.js";
+import {
+  loadMemoryWikiDiagnosticSnapshot,
+  type MemoryWikiCompiledCacheSnapshot,
+  type MemoryWikiSourceCounts,
+} from "./compiled-cache.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
-import { parseWikiMarkdown } from "./markdown.js";
 import { probeObsidianCli } from "./obsidian.js";
-import { WIKI_PAGE_GROUPS, type WikiPageKind } from "./wiki-page-kinds.js";
+import type { WikiPageKind } from "./wiki-page-kinds.js";
 
 const STATUS_WARNING_FIXES = {
   "vault-missing": "Run `openclaw wiki init` to create the vault layout.",
   "obsidian-cli-missing": "Install the official Obsidian CLI or disable `obsidian.useOfficialCli`.",
   "bridge-disabled":
     "Enable `plugins.entries.memory-wiki.config.bridge.enabled` or switch vaultMode away from `bridge`.",
-  "bridge-artifacts-missing":
-    "Use a memory plugin that exports public artifacts, create/import memory artifacts first, or switch the wiki back to isolated mode.",
+  "compiled-snapshot-missing":
+    "Run `openclaw wiki compile` to publish a snapshot; use `openclaw wiki bridge import` to refresh bridge inputs first.",
+  "compiled-snapshot-unreadable":
+    "Inspect the plugin state read error, then run `openclaw wiki compile` if the snapshot needs rebuilding.",
   "unsafe-local-disabled":
     "Enable `unsafeLocal.allowPrivateMemoryCoreAccess` or switch vaultMode away from `unsafe-local`.",
   "unsafe-local-paths-missing":
@@ -41,90 +41,50 @@ type MemoryWikiStatusOptions = {
   callerAgentId?: string;
 };
 
-function createEmptyVaultCounts() {
-  const pageCounts: Record<WikiPageKind, number> = {
-    entity: 0,
-    concept: 0,
-    source: 0,
-    synthesis: 0,
-    report: 0,
+function unknownCounts() {
+  const pageCounts: Record<WikiPageKind, number | null> = {
+    entity: null,
+    concept: null,
+    source: null,
+    synthesis: null,
+    report: null,
   };
-  const sourceCounts = {
-    native: 0,
-    bridge: 0,
-    bridgeEvents: 0,
-    unsafeLocal: 0,
-    other: 0,
+  const sourceCounts: { [K in keyof MemoryWikiSourceCounts]: number | null } = {
+    native: null,
+    bridge: null,
+    bridgeEvents: null,
+    unsafeLocal: null,
+    other: null,
   };
-  return { pageCounts, sourceCounts };
-}
-
-async function collectVaultCounts(vaultPath: string) {
-  const { pageCounts, sourceCounts } = createEmptyVaultCounts();
-  for (const { dir, kind } of WIKI_PAGE_GROUPS) {
-    await runTasksWithConcurrency({
-      tasks: (await listMemoryWikiPagePaths(vaultPath, dir)).map((relativePath) => async () => {
-        const raw = await fs.readFile(path.join(vaultPath, relativePath), "utf8").catch(() => null);
-        if (raw === null) {
-          return;
-        }
-        let frontmatter: Record<string, unknown>;
-        try {
-          frontmatter = parseWikiMarkdown(raw).frontmatter;
-        } catch {
-          return;
-        }
-        pageCounts[kind] += 1;
-        if (kind !== "source") {
-          return;
-        }
-        const sourceType = normalizeOptionalString(frontmatter.sourceType);
-        if (sourceType === "memory-bridge-events") {
-          sourceCounts.bridgeEvents += 1;
-        } else if (sourceType === "memory-bridge") {
-          sourceCounts.bridge += 1;
-        } else if (
-          normalizeOptionalString(frontmatter.provenanceMode) === "unsafe-local" ||
-          sourceType === "memory-unsafe-local"
-        ) {
-          sourceCounts.unsafeLocal += 1;
-        } else if (!sourceType) {
-          sourceCounts.native += 1;
-        } else {
-          sourceCounts.other += 1;
-        }
-      }),
-      limit: 16,
-      errorMode: "stop",
-      throwOnError: true,
-    });
-  }
   return { pageCounts, sourceCounts };
 }
 
 export async function resolveMemoryWikiStatus(
   config: ResolvedMemoryWikiConfig,
-  options?: MemoryWikiStatusOptions,
+  _options?: MemoryWikiStatusOptions,
 ) {
   const agentId = resolveMemoryWikiVaultAgentId(config);
   const vaultExists = await pathExists(config.vault.path);
-  const bridgePublicArtifactCount =
-    options?.appConfig &&
-    config.vaultMode === "bridge" &&
-    config.bridge.enabled &&
-    config.bridge.readMemoryArtifacts
-      ? filterMemoryWikiBridgeArtifacts({
-          config,
-          callerAgentId: options.callerAgentId,
-          artifacts: await listActiveMemoryPublicArtifacts({
-            cfg: options.appConfig,
-          }),
-        }).length
-      : null;
+  // Public artifact enumeration can materialize exports. Diagnostics deliberately
+  // leave that live count unknown, independently of imported source-page counts.
   const obsidianProbe = await probeObsidianCli();
-  const counts = vaultExists
-    ? await collectVaultCounts(config.vault.path)
-    : createEmptyVaultCounts();
+  let published: MemoryWikiCompiledCacheSnapshot | null = null;
+  let snapshotState: "published" | "unavailable" | "failed" = "unavailable";
+  if (vaultExists) {
+    try {
+      published = await loadMemoryWikiDiagnosticSnapshot(config);
+      snapshotState = published ? "published" : "unavailable";
+    } catch {
+      snapshotState = "failed";
+    }
+  }
+  const counts = unknownCounts();
+  if (published) {
+    Object.assign(counts.pageCounts, published.dashboards.overview.pageCounts);
+    if (published.diagnostics) {
+      Object.assign(counts.sourceCounts, published.diagnostics.sourceCounts);
+    }
+  }
 
   const rules: Array<[boolean, MemoryWikiStatusWarning["code"], string]> = [
     [!vaultExists, "vault-missing", "Wiki vault has not been initialized yet."],
@@ -139,12 +99,14 @@ export async function resolveMemoryWikiStatus(
       "vaultMode is `bridge` but bridge.enabled is false.",
     ],
     [
-      config.vaultMode === "bridge" &&
-        config.bridge.enabled &&
-        config.bridge.readMemoryArtifacts &&
-        bridgePublicArtifactCount === 0,
-      "bridge-artifacts-missing",
-      "Bridge mode is enabled but the active memory plugin is not exporting any public memory artifacts yet.",
+      vaultExists && snapshotState === "unavailable",
+      "compiled-snapshot-missing",
+      "No published wiki snapshot is available; page counts are unknown.",
+    ],
+    [
+      vaultExists && snapshotState === "failed",
+      "compiled-snapshot-unreadable",
+      "The published wiki snapshot could not be read; page counts are unknown.",
     ],
     [
       config.vaultMode === "unsafe-local" && !config.unsafeLocal.allowPrivateMemoryCoreAccess,
@@ -173,7 +135,11 @@ export async function resolveMemoryWikiStatus(
     vaultPath: config.vault.path,
     vaultExists,
     bridge: config.bridge,
-    bridgePublicArtifactCount,
+    bridgePublicArtifactCount: null as number | null,
+    snapshot: {
+      state: snapshotState,
+      compiledAt: published?.diagnostics?.compiledAt ?? null,
+    },
     obsidianCli: {
       enabled: config.obsidian.enabled,
       requested: config.obsidian.enabled && config.obsidian.useOfficialCli,
@@ -207,16 +173,22 @@ export function renderMemoryWikiStatus(
   status: MemoryWikiStatus,
   text: (value: string) => string = String,
 ): string {
+  const count = (value: number | null) => (value === null ? "unknown" : String(value));
   const lines = [
     `Wiki vault mode: ${text(status.vaultMode)}`,
     `Vault scope: ${text(status.vaultScope)}${status.agentId ? ` (${text(status.agentId)})` : ""}`,
     `Vault: ${status.vaultExists ? "ready" : "missing"} (${text(status.vaultPath)})`,
     `Render mode: ${text(status.renderMode)}`,
     `Obsidian CLI: ${status.obsidianCli.available ? "available" : "missing"}${status.obsidianCli.requested ? " (requested)" : ""}`,
-    `Bridge: ${status.bridge.enabled ? "enabled" : "disabled"}${status.bridgePublicArtifactCount !== null ? ` (${status.bridgePublicArtifactCount} exported artifact${status.bridgePublicArtifactCount === 1 ? "" : "s"})` : ""}`,
+    `Bridge: ${status.bridge.enabled ? "enabled" : "disabled"}${status.bridgePublicArtifactCount !== null ? ` (${status.bridgePublicArtifactCount} exported artifact${status.bridgePublicArtifactCount === 1 ? "" : "s"})` : " (live export count not checked)"}`,
     `Unsafe local: ${status.unsafeLocal.allowPrivateMemoryCoreAccess ? `enabled (${status.unsafeLocal.pathCount} paths)` : "disabled"}`,
-    `Pages: ${status.pageCounts.source} sources, ${status.pageCounts.entity} entities, ${status.pageCounts.concept} concepts, ${status.pageCounts.synthesis} syntheses, ${status.pageCounts.report} reports`,
-    `Source provenance: ${status.sourceCounts.native} native, ${status.sourceCounts.bridge} bridge, ${status.sourceCounts.bridgeEvents} bridge-events, ${status.sourceCounts.unsafeLocal} unsafe-local, ${status.sourceCounts.other} other`,
+    ...(status.snapshot
+      ? [
+          `Snapshot: ${status.snapshot.state}${status.snapshot.compiledAt ? ` (${text(status.snapshot.compiledAt)})` : " (compile time unknown)"}; counts describe the last publication, not current files`,
+        ]
+      : []),
+    `Pages: ${count(status.pageCounts.source)} sources, ${count(status.pageCounts.entity)} entities, ${count(status.pageCounts.concept)} concepts, ${count(status.pageCounts.synthesis)} syntheses, ${count(status.pageCounts.report)} reports`,
+    `Source provenance: ${count(status.sourceCounts.native)} native, ${count(status.sourceCounts.bridge)} bridge, ${count(status.sourceCounts.bridgeEvents)} bridge-events, ${count(status.sourceCounts.unsafeLocal)} unsafe-local, ${count(status.sourceCounts.other)} other`,
   ];
 
   if (status.warnings.length > 0) {

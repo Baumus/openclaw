@@ -13,7 +13,7 @@ import { listMemoryWikiImportRuns } from "./import-runs.js";
 import { ingestMemoryWikiSource } from "./ingest.js";
 import { searchMemoryWiki } from "./query.js";
 import { syncMemoryWikiImportedSources } from "./source-sync.js";
-import { resolveMemoryWikiStatus } from "./status.js";
+import { buildMemoryWikiDoctorReport, resolveMemoryWikiStatus } from "./status.js";
 import { createCompiledSnapshot, createMemoryWikiTestHarness } from "./test-helpers.js";
 
 type ApplyMemoryWikiMutation = ReturnType<typeof normalizeMemoryWikiMutationInput>;
@@ -195,6 +195,20 @@ describe("memory-wiki gateway methods", () => {
     vi.mocked(searchMemoryWiki).mockResolvedValue({ items: [], total: 0 } as never);
   });
 
+  it.each(["wiki.status", "wiki.doctor"])(
+    "%s responds without starting source synchronization",
+    async (method) => {
+      const { run, respond } = await createGateway(method);
+      vi.mocked(buildMemoryWikiDoctorReport).mockReturnValueOnce({ healthy: true } as never);
+      vi.mocked(syncMemoryWikiImportedSources).mockRejectedValueOnce(
+        new Error("Diagnostics must not import or compile"),
+      );
+      await run();
+      expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith(true, expect.anything());
+    },
+  );
+
   it("registers Obsidian, ingest, and compile methods with their required scopes", async () => {
     const { registerGatewayMethod } = await createGateway("wiki.compile");
 
@@ -285,10 +299,7 @@ describe("memory-wiki gateway methods", () => {
       vault: expect.objectContaining({ path: path.join(rootDir, "marketing") }),
     });
     expect(getAppConfig).toHaveBeenCalledTimes(1);
-    expect(syncMemoryWikiImportedSources).toHaveBeenCalledWith({
-      config: resolvedConfig,
-      appConfig: scopedAppConfig,
-    });
+    expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
     expect(resolveMemoryWikiStatus).toHaveBeenCalledWith(resolvedConfig, {
       appConfig: scopedAppConfig,
     });

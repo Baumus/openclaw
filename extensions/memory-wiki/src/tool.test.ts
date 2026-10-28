@@ -1,13 +1,39 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { lintMemoryWikiVault } from "./lint.js";
 import { parseWikiMarkdown } from "./markdown.js";
-import { createMemoryWikiTestHarness } from "./test-helpers.js";
-import { createWikiApplyTool, createWikiLintTool } from "./tool.js";
+import * as sourceSync from "./source-sync.js";
+import {
+  createCompiledSnapshot,
+  createMemoryWikiTestHarness,
+  publishCompiledSnapshot,
+} from "./test-helpers.js";
+import { createWikiApplyTool, createWikiLintTool, createWikiStatusTool } from "./tool.js";
 
 describe("memory-wiki tools", () => {
   const harness = createMemoryWikiTestHarness();
+
+  it("reports published counts without importing from the status tool", async () => {
+    const { config } = await harness.createVault({ initialize: true });
+    const snapshot = createCompiledSnapshot();
+    snapshot.dashboards.overview.pageCounts.source = 12_416;
+    await publishCompiledSnapshot(config, snapshot);
+    const sync = vi
+      .spyOn(sourceSync, "syncMemoryWikiImportedSources")
+      .mockRejectedValue(new Error("Status must not synchronize"));
+    try {
+      const result = await createWikiStatusTool(config).execute("status", {});
+      expect(result.details).toMatchObject({
+        pageCounts: { source: 12_416 },
+        bridgePublicArtifactCount: null,
+        snapshot: { state: "published" },
+      });
+      expect(sync).not.toHaveBeenCalled();
+    } finally {
+      sync.mockRestore();
+    }
+  });
 
   it("rejects non-object wiki_apply arguments without throwing a TypeError", async () => {
     const { config } = await harness.createVault({ initialize: true });
