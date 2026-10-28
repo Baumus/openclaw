@@ -199,13 +199,52 @@ describe("memory-wiki gateway methods", () => {
     "%s responds without starting source synchronization",
     async (method) => {
       const { run, respond } = await createGateway(method);
-      vi.mocked(buildMemoryWikiDoctorReport).mockReturnValueOnce({ healthy: true } as never);
-      vi.mocked(syncMemoryWikiImportedSources).mockRejectedValueOnce(
+      vi.mocked(buildMemoryWikiDoctorReport).mockImplementationOnce((status) => ({
+        healthy: true,
+        warningCount: 0,
+        status,
+        fixes: [],
+      }));
+      vi.mocked(syncMemoryWikiImportedSources).mockRejectedValue(
         new Error("Diagnostics must not import or compile"),
       );
-      await run();
+      await run({ statusMode: "snapshot" });
       expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
       expect(respond).toHaveBeenCalledWith(true, expect.anything());
+    },
+  );
+
+  it.each(["wiki.status", "wiki.doctor"])(
+    "%s preserves synchronization and live counts for unnegotiated clients",
+    async (method) => {
+      const signal = new AbortController().signal;
+      const { config, run, respond } = await createGateway(method, {
+        resolveSourceSyncSignal: () => signal,
+      });
+      vi.mocked(buildMemoryWikiDoctorReport).mockImplementationOnce((status) => ({
+        healthy: true,
+        warningCount: 0,
+        status,
+        fixes: [],
+      }));
+      await run();
+      expect(syncMemoryWikiImportedSources).toHaveBeenCalledWith({ config, appConfig: {}, signal });
+      expect(resolveMemoryWikiStatus).toHaveBeenCalledWith(config, { appConfig: {}, mode: "live" });
+      expect(respond).toHaveBeenCalledWith(true, expect.anything());
+    },
+  );
+
+  it.each(["unknown", null, 1])(
+    "rejects invalid diagnostic mode %j before synchronization",
+    async (statusMode) => {
+      const { run, respond } = await createGateway("wiki.status");
+      await run({ statusMode });
+      expect(readRespondError(respond)).toEqual({
+        code: "internal_error",
+        message: "statusMode must be one of: snapshot, live.",
+      });
+      expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
+      expect(resolveMemoryWikiStatus).not.toHaveBeenCalled();
     },
   );
 
@@ -292,7 +331,7 @@ describe("memory-wiki gateway methods", () => {
     const getAppConfig = vi.fn(() => scopedAppConfig);
     const { rootDir, run, respond } = await createGateway("wiki.status", { getAppConfig }, true);
 
-    await run({ agentId: "marketing" });
+    await run({ agentId: "marketing", statusMode: "snapshot" });
 
     const resolvedConfig = expect.objectContaining({
       agentId: "marketing",
@@ -302,6 +341,7 @@ describe("memory-wiki gateway methods", () => {
     expect(syncMemoryWikiImportedSources).not.toHaveBeenCalled();
     expect(resolveMemoryWikiStatus).toHaveBeenCalledWith(resolvedConfig, {
       appConfig: scopedAppConfig,
+      mode: "snapshot",
     });
     expect(readRespondPayload(respond)).toEqual({
       vaultScope: "agent",

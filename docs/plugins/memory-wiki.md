@@ -82,7 +82,15 @@ import` route through the running Gateway so they see the same active memory
 plugin context as agent/runtime memory. If bridge is disabled or artifact
 reads are off, those commands keep local/offline behavior.
 
-Status, doctor, and `wiki_status` read the last published compile snapshot without
+The current CLI explicitly requests snapshot diagnostics with `statusMode: "snapshot"`
+on `wiki.status` and `wiki.doctor`. Gateway callers that omit this parameter
+retain the released live behavior: synchronization, numeric counts, and exporter
+health checks. They can still exceed the CLI deadline on large vaults. The Gateway
+also accepts `statusMode: "live"` to select that behavior explicitly. Nullable
+counts are returned only to callers that select snapshot mode; existing remote
+CLI clients do not need to upgrade together with the Gateway.
+
+Local status/doctor, snapshot-mode Gateway calls, and `wiki_status` read the last published compile snapshot without
 starting source synchronization, compilation, or a full page scan. Counts may
 lag source edits; missing counts are reported as unknown. Existing snapshots
 retain their page counts, while compile timestamps and provenance counts become

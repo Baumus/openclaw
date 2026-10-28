@@ -128,7 +128,7 @@ describe("memory wiki status and doctor", () => {
 
     const status = await resolveMemoryWikiStatus(config);
 
-    expect(status.snapshot.state).toBe("unavailable");
+    expect(status.snapshot?.state).toBe("unavailable");
     expect(status.pageCounts.source).toBeNull();
     expect(buildMemoryWikiDoctorReport(status).healthy).toBe(false);
   });
@@ -147,6 +147,40 @@ describe("memory wiki status and doctor", () => {
     expect(renderMemoryWikiDoctor(report)).toContain("unknown sources");
   });
 
+  it("preserves numeric live counts and exporter health before any compile for released clients", async () => {
+    const { config, page, write } = await createVault({
+      initialize: true,
+      config: { vaultMode: "bridge", bridge: { enabled: true, readMemoryArtifacts: true } },
+    });
+    await page("sources/native.md", { pageType: "source", title: "Native" });
+    await page("sources/bridge.md", {
+      pageType: "source",
+      title: "Bridge",
+      sourceType: "memory-bridge",
+    });
+    await write("sources/broken.md", "---\nbroken: [\n---\n");
+    vi.spyOn(memoryHost, "listActiveMemoryPublicArtifacts").mockResolvedValue([]);
+    const status = await resolveMemoryWikiStatus(config, { appConfig: {}, mode: "live" });
+    expect(status.pageCounts).toEqual({
+      entity: 0,
+      concept: 0,
+      source: 2,
+      synthesis: 0,
+      report: 0,
+    });
+    expect(status.sourceCounts).toEqual({
+      native: 1,
+      bridge: 1,
+      bridgeEvents: 0,
+      unsafeLocal: 0,
+      other: 0,
+    });
+    expect(status.bridgePublicArtifactCount).toBe(0);
+    expect(status.snapshot).toBeUndefined();
+    expect(status.warnings.map(({ code }) => code)).toEqual(["bridge-artifacts-missing"]);
+    expect(buildMemoryWikiDoctorReport(status).healthy).toBe(false);
+  });
+
   it("reports snapshot read failures without scanning the vault", async () => {
     const { config } = await createVault({ initialize: true });
     vi.spyOn(compiledCache, "loadMemoryWikiDiagnosticSnapshot").mockRejectedValue(
@@ -156,7 +190,7 @@ describe("memory wiki status and doctor", () => {
       .spyOn(boundedWalk, "listMemoryWikiPagePaths")
       .mockRejectedValue(new Error("no fallback"));
     const status = await resolveMemoryWikiStatus(config);
-    expect(status.snapshot.state).toBe("failed");
+    expect(status.snapshot?.state).toBe("failed");
     expect(status.warnings.map((warning) => warning.code)).toContain(
       "compiled-snapshot-unreadable",
     );

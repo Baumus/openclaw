@@ -343,8 +343,8 @@ describe("memory-wiki cli", () => {
 
     expect(callGatewayFromCliMock.mock.calls.map(([method, , params]) => [method, params])).toEqual(
       [
-        ["wiki.status", { agentId: "marketing" }],
-        ["wiki.doctor", { agentId: "marketing" }],
+        ["wiki.status", { agentId: "marketing", statusMode: "snapshot" }],
+        ["wiki.doctor", { agentId: "marketing", statusMode: "snapshot" }],
         ["wiki.bridge.import", { agentId: "marketing" }],
       ],
     );
@@ -505,6 +505,15 @@ describe("memory-wiki cli", () => {
     await expect(runWiki(config, ["status"])).rejects.toThrow(
       "Invalid Gateway response for wiki.status.",
     );
+  });
+
+  it("accepts released Gateway responses that do not expose snapshot metadata", async () => {
+    const { config } = await createBridgeCliVault();
+    const { snapshot: _snapshot, ...legacyStatus } = createGatewayStatus(config);
+    const legacyReport = { healthy: true, warningCount: 0, status: legacyStatus, fixes: [] };
+    callGatewayFromCliMock.mockResolvedValueOnce(legacyStatus).mockResolvedValueOnce(legacyReport);
+    expect(JSON.parse(await runWiki(config, ["status", "--json"]))).toEqual(legacyStatus);
+    expect(JSON.parse(await runWiki(config, ["doctor", "--json"]))).toEqual(legacyReport);
   });
 
   it("accepts unknown snapshot counts without reporting an empty wiki", async () => {

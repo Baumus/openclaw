@@ -181,10 +181,21 @@ export function registerMemoryWikiGatewayMethods(params: {
     return { agentId, appConfig, config, signal };
   };
 
-  registerResultMethod("wiki.status", READ_SCOPE, async (requestParams) => {
-    const { appConfig, config } = resolveRequestContext(requestParams);
-    return await resolveMemoryWikiStatus(config, { appConfig });
-  });
+  const resolveDiagnosticStatus = async (requestParams: Record<string, unknown>) => {
+    const requestedMode = requestParams.statusMode;
+    if (requestedMode !== undefined && requestedMode !== "snapshot" && requestedMode !== "live") {
+      throw new Error("statusMode must be one of: snapshot, live.");
+    }
+    // Released remote clients have not negotiated nullable snapshot counts.
+    const mode = requestedMode ?? "live";
+    const { appConfig, config, signal } = resolveRequestContext(requestParams);
+    if (mode === "live") {
+      await syncMemoryWikiImportedSources({ config, appConfig, ...(signal ? { signal } : {}) });
+    }
+    return await resolveMemoryWikiStatus(config, { appConfig, mode });
+  };
+
+  registerResultMethod("wiki.status", READ_SCOPE, resolveDiagnosticStatus);
 
   registerResultMethod("wiki.importRuns", READ_SCOPE, async (requestParams) => {
     const { config } = resolveRequestContext(requestParams);
@@ -210,9 +221,7 @@ export function registerMemoryWikiGatewayMethods(params: {
   });
 
   registerResultMethod("wiki.doctor", READ_SCOPE, async (requestParams) => {
-    const { appConfig, config } = resolveRequestContext(requestParams);
-    const status = await resolveMemoryWikiStatus(config, { appConfig });
-    return buildMemoryWikiDoctorReport(status);
+    return buildMemoryWikiDoctorReport(await resolveDiagnosticStatus(requestParams));
   });
 
   registerResultMethod("wiki.compile", WRITE_SCOPE, async (requestParams) => {

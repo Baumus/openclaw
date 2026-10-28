@@ -272,7 +272,11 @@ async function callWikiGateway(
   const result = await callGatewayFromCli(
     method,
     { timeout: WIKI_GATEWAY_TIMEOUT_MS },
-    agentId ? { agentId } : undefined,
+    method === "wiki.bridge.import"
+      ? agentId
+        ? { agentId }
+        : undefined
+      : { ...(agentId ? { agentId } : {}), statusMode: "snapshot" },
     { progress: false },
   );
   if (

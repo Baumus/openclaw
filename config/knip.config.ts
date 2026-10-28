@@ -422,6 +422,7 @@ const repositoryScriptEntries = [
   "scripts/bench-media-completion-gateway.mts!",
   "scripts/bench-media-completion-wait.mts!",
   "scripts/bench-memory-keyword.mjs!",
+  "scripts/prove-memory-wiki-diagnostics-upgrade.mts!",
   "scripts/bench-session-cost-ready.mts!",
   "scripts/bench-session-projection-ready.mts!",
   "scripts/perf/bench-postgres-ann-decision.mjs!",
