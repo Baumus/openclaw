@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { writePackageDistInventory } from "../../scripts/lib/package-dist-inventory.ts";
+import { withUpdateCommandExecutor } from "../cli/update-cli/update-command-executor.js";
 import {
   openPackageActivationJournal,
   resolvePackageActivationJournalPath,
@@ -9,6 +11,7 @@ import {
 import { createPackageActivationLifetimeFixture } from "./package-update-activation-lifetime.test-support.js";
 import { createPackageIntegrityReader } from "./package-update-integrity.js";
 import { legacyPackageFingerprint } from "./package-update-legacy.test-support.js";
+import { createPublicationOwner } from "./package-update-publication-owner.js";
 
 /** Synthetic lost publish acknowledgement; the original launcher already names the candidate. */
 export async function prepareRemountedPublication(
@@ -16,6 +19,7 @@ export async function prepareRemountedPublication(
   root: string,
   legacy = false,
   launchers: "equal-symlinks" | "different-files" = "equal-symlinks",
+  published = false,
 ) {
   const prepared = await fixture.prepare(async () => {
     const stage = path.join(root, "stage/lib/node_modules/openclaw");
@@ -39,8 +43,14 @@ export async function prepareRemountedPublication(
     }
   });
   const journal = openPackageActivationJournal(prepared.anchor);
+  if (published) {
+    await withUpdateCommandExecutor(randomUUID(), async (executor) => {
+      const fence = await executor.enter(prepared.packageRoot);
+      await createPublicationOwner(prepared.anchor, journal, fence.assertCurrent).publish(false);
+    });
+  }
   const initial = journal.read();
-  const candidate = path.join(prepared.anchor, "candidate");
+  const candidate = published ? prepared.packageRoot : path.join(prepared.anchor, "candidate");
   const actualDevice = String(fs.statSync(candidate, { bigint: true }).dev);
   const historicalDevice = String(BigInt(actualDevice) + 1000n);
   const tree = legacy
@@ -52,23 +62,30 @@ export async function prepareRemountedPublication(
         false,
         new Map([[actualDevice, historicalDevice]]),
       );
-  journal.transition(initial, "publishing", { kind: "publish" }, () => {});
-  fs.renameSync(prepared.packageRoot, path.join(prepared.anchor, "previous"));
-  fs.renameSync(candidate, prepared.packageRoot);
+  if (!published) {
+    journal.transition(initial, "publishing", { kind: "publish" }, () => {});
+    fs.renameSync(prepared.packageRoot, path.join(prepared.anchor, "previous"));
+    fs.renameSync(candidate, prepared.packageRoot);
+  }
   const record = journal.read();
   if (!("digest" in record.descriptor.candidate)) {
     throw new Error("Fixture requires a full candidate fingerprint.");
   }
   record.descriptor.candidate.digest = tree.digest;
-  const historical = JSON.stringify(record.descriptor, (_key, value: unknown) =>
-    typeof value === "string" && /^\d+:\d+$/u.test(value)
-      ? value.replace(/^\d+/u, (device) => String(BigInt(device) + 1000n))
-      : value,
-  );
+  const historicalJson = (input: unknown) =>
+    JSON.stringify(input, (_key, value: unknown) =>
+      typeof value === "string" && /^\d+:\d+$/u.test(value)
+        ? value.replace(/^\d+/u, (device) => String(BigInt(device) + 1000n))
+        : value,
+    );
+  const historical = historicalJson(record.descriptor);
+  const publications = historicalJson(record.publications);
   const journalPath = resolvePackageActivationJournalPath(prepared.anchor);
   const db = new DatabaseSync(journalPath);
   try {
-    db.prepare("UPDATE package_activation SET descriptor_json = ?, revision = 35").run(historical);
+    db.prepare(
+      "UPDATE package_activation SET descriptor_json = ?, publications_json = ?, revision = 35",
+    ).run(historical, publications);
   } finally {
     db.close();
   }

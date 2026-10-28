@@ -68,9 +68,10 @@ export function inspectRemountedPackagePublication(
     // does not authorize accepting a replacement inode.
     const previous = entry.previousIdentity;
     const historical =
-      previous && previous.split(":")[1] === current.split(":")[1]
+      record.publications.find((published) => published.name === entry.name)?.identity ??
+      (previous && previous.split(":")[1] === current.split(":")[1]
         ? previous
-        : entry.candidateIdentity;
+        : entry.candidateIdentity);
     if (
       historical === previous &&
       (!entry.previous ||
