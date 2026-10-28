@@ -8,10 +8,12 @@ import { captureCurrentCoreRecoveryRisk } from "../update-cli/update-command-cur
 import { runGatewayServiceUpdateCommand } from "./update-executor.js";
 
 const mocks = vi.hoisted(() => ({ root: "/fixture-current-root", assertLease: vi.fn() }));
-vi.mock("../../infra/openclaw-root.js", () => ({
+vi.mock("../../infra/openclaw-root.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../infra/openclaw-root.js")>()),
   resolveOpenClawPackageRoot: async () => mocks.root,
 }));
-vi.mock("../update-cli/update-command-executor.js", () => ({
+vi.mock("../update-cli/update-command-executor.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../update-cli/update-command-executor.js")>()),
   withDelegatedUpdateCommandExecutor: async (
     _grant: unknown,
     _runId: string,

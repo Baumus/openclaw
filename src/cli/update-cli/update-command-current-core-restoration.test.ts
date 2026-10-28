@@ -33,8 +33,14 @@ vi.mock("../../daemon/schtasks-exec.js", async () => ({
   execScheduledTaskEnabledChange: (name: string, enabled: boolean) =>
     mocks.task(["/Change", "/TN", name, enabled ? "/ENABLE" : "/DISABLE"]),
 }));
-vi.mock("./update-command-convergence.js", () => ({ convergeUpdatePlugins: mocks.converge }));
-vi.mock("./progress.js", () => ({ printResult: mocks.printResult }));
+vi.mock("./update-command-convergence.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./update-command-convergence.js")>()),
+  convergeUpdatePlugins: mocks.converge,
+}));
+vi.mock("./progress.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./progress.js")>()),
+  printResult: mocks.printResult,
+}));
 vi.mock("../../infra/gateway-lock.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../infra/gateway-lock.js")>()),
   readActiveGatewayLockPort: mocks.activePort,

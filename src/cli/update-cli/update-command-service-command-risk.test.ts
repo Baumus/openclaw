@@ -5,11 +5,16 @@ import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db
 import { captureCurrentCoreRecoveryRisk } from "./update-command-current-core-recovery.js";
 import { runUpdatedInstallGatewayCommand } from "./update-command-service-command.js";
 const mocks = vi.hoisted(() => ({ entry: vi.fn(), command: vi.fn(), child: vi.fn() }));
-vi.mock("../../daemon/gateway-entrypoint.js", () => ({
+vi.mock("../../daemon/gateway-entrypoint.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../daemon/gateway-entrypoint.js")>()),
   resolveGatewayInstallEntrypoint: mocks.entry,
 }));
-vi.mock("../../process/exec.js", () => ({ runCommandWithTimeout: mocks.command }));
-vi.mock("./update-command-executor.js", () => ({
+vi.mock("../../process/exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../process/exec.js")>()),
+  runCommandWithTimeout: mocks.command,
+}));
+vi.mock("./update-command-executor.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./update-command-executor.js")>()),
   requiresRetainedUpdateCommandOwner: () => false,
   withUpdateCommandExecutorChild: mocks.child,
 }));
