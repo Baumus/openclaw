@@ -125,6 +125,46 @@ WhatsApp plugins retain the adapter. Remove this patch and its registration
 when an upstream Baileys version accepts the current decoder and passes the
 same voice-note regression.
 
+## Zod 3.25.76 early collection bounds
+
+zod@3.25.76.patch is a local Zod-3 adaptation of the early upper-size rejection
+behavior in Colin McDonnell's upstream Zod commit
+a0ebf970f2d752e5f58527cd2942ff48be4f46bd (colinhacks/zod#6652).
+It is not an upstream Zod-3 release, a cherry-pick, or an A2UI/Zod-4 migration.
+The implementation changes three branches in each of src/v3/types.ts,
+v3/types.js, and v3/types.cjs: oversized array max/exact length and set max
+return the existing aborted result before visiting elements. Set exact size
+already delegates to max/min. No declaration, export, A2UI source, license or
+Zod-4 implementation is replaced.
+
+This mitigates collection traversal only where an upper bound is declared.
+A2UI 0.12's catalog JSON-schema loader translates maxItems into such a bound;
+0.11's loader does not, so its integration regression instead exercises a
+custom bounded function schema through the public Catalog invoker. This does
+not add protocol-wide message limits or protect unbounded arrays.
+
+An oversized collection now aborts instead of returning dirty: element and
+outer refinements do not run, and a failing union may report invalid_union
+instead of the dirty branch's too_big. Valid transforms, preprocessing,
+lower-bound failures and wrong-type rejection are covered by regressions.
+The exact-version patch also affects other consumers resolving Zod 3.25.76,
+including zod-to-json-schema; the separate parser embedded in Discord's SDK
+and the package's v4 subpath are not changed. No global advisory clearance is
+claimed. Keep source attribution and original copyright notices intact.
+
+Run node --test test/scripts/a2ui-zod-bounds.regression.mjs and the native
+node scripts/run-vitest.mjs run test/scripts/a2ui-zod-bounds.test.ts.
+
+The package-patch guard registers only zod@3.25.76 at
+patches/zod@3.25.76.patch. Other versions, paths and package-local patch
+registrations remain rejected; no guard or blanket exception is disabled.
+Remove this registration and patch when a maintained upstream release retains
+Zod 3 public contracts and passes the same baseline/fixed Catalog regressions,
+public declaration checks and Canvas bundle checks. Independent full-context
+review and required hosted checks still gate readiness.
+
+Patch SHA-256: 2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d
+
 `@discord/embedded-app-sdk@2.5.0` vendors Zod 3 in both `output/lib/zod/lib/index.mjs`
 and `index.cjs`; changing the separately installed Zod package does not repair
 the browser SDK. This patch is a local Zod-3 adaptation of the early upper-size

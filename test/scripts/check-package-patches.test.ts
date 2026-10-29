@@ -34,6 +34,7 @@ afterEach(() => {
 describe("check-package-patches", () => {
   it("allows approved pnpm patches together", () => {
     const approvedPatches = [
+      ["zod@3.25.76", "patches/zod@3.25.76.patch"],
       ["@awesome.me/webawesome@3.13.0", "patches/@awesome.me__webawesome@3.13.0.patch"],
       ["baileys@7.0.0-rc12", "patches/baileys@7.0.0-rc12.patch"],
       ["baileys@7.0.0-rc13", "patches/baileys@7.0.0-rc13.patch"],
@@ -70,6 +71,9 @@ ${approvedPatches.map(([specifier]) => `  "${specifier}": a9aea1790d2c65b1ae543c
 
   it.each([
     ["left-pad@1.3.0", "patches/left-pad@1.3.0.patch"],
+    ["zod@3.25.77", "patches/zod@3.25.77.patch"],
+    ["zod@4.0.0", "patches/zod@4.0.0.patch"],
+    ["zod@3.25.76", "patches/zod@3.25.76-other.patch"],
     ["matrix-js-sdk@42.4.1", "patches/matrix-js-sdk@42.4.1.patch"],
     ["matrix-js-sdk@42.4.0", "patches/matrix-js-sdk@42.4.0-other.patch"],
   ])("rejects unapproved workspace patch %s -> %s", (specifier, patchPath) => {

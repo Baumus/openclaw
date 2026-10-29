@@ -223,6 +223,7 @@ patchedDependencies:
   ghostty-web@0.4.0: d4c6598b6840564dac4a469f3aa9b8df24fe6eab48a6744302707017e095a524
   matrix-js-sdk@42.4.0: 12d9bb9bdc53b7b96d8d887d0bea6b3072d1fef488b51102caec19fb651c8e92
   vitest@5.0.1: 90ba2969491e095cc2e92a4d38256dfcf64f85078ec29e1762b9429a00b35901
+  zod@3.25.76: 2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d
 
 importers:
 
@@ -10354,7 +10355,7 @@ snapshots:
       '@lit/context': 1.1.6
       lit: 3.3.3
       signal-utils: 0.21.1(signal-polyfill@0.2.2)
-      zod: 3.25.76
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
     transitivePeerDependencies:
       - signal-polyfill
 
@@ -10364,8 +10365,8 @@ snapshots:
       '@preact/signals-core': 1.14.4
       lit: 3.3.3
       validate-color: 2.2.4
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
+      zod-to-json-schema: 3.25.2(zod@3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d))
 
   '@agentclientprotocol/claude-agent-acp@0.85.1(@anthropic-ai/sdk@0.131.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))':
     dependencies:
@@ -11463,7 +11464,7 @@ snapshots:
       eventemitter3: 5.0.4
       lodash.transform: 4.6.0
       uuid: 14.0.2
-      zod: 3.25.76
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
 
   '@discordjs/voice@0.19.2(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)':
     dependencies:
@@ -18334,15 +18335,15 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)):
     dependencies:
-      zod: 3.25.76
+      zod: 3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d)
 
   zod-to-json-schema@3.25.2(zod@4.6.5):
     dependencies:
       zod: 4.6.5
 
-  zod@3.25.76: {}
+  zod@3.25.76(patch_hash=2f14d2000a3645bf519c1a1cc4848a71d55185327a9a976a4f033e7d507b727d): {}
 
   zod@4.3.6: {}
 
