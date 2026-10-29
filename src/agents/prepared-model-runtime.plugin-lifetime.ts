@@ -50,7 +50,10 @@ type Lifetime = ReturnType<typeof createLifetime>;
 const { generations, active, retirements, publications } = resolveGlobalSingleton(
   Symbol.for("openclaw.preparedPluginLifetimes"),
   () => ({
-    generations: new WeakMap<PreparedModelRuntimePluginGeneration, Lifetime>(),
+    generations: new WeakMap<
+      PreparedModelRuntimePluginGeneration,
+      { lifetime: Lifetime; releaseUnpublished?: () => void | Promise<void> }
+    >(),
     active: new Set<Lifetime>(),
     retirements: new Set<Promise<void>>(),
     publications: new WeakMap<object, { release: () => Promise<void> }>(),
@@ -168,10 +171,11 @@ export function registerPreparedPluginLifetime(): void {
 
 export function ownPreparedPluginGeneration(
   generation: PreparedModelRuntimePluginGeneration,
+  options: { unpublished?: boolean } = {},
 ): Lifetime {
   const existing = generations.get(generation);
   if (existing) {
-    return existing;
+    return existing.lifetime;
   }
   registerPreparedPluginLifetime();
   const releaseMetadata = retainPluginCache(
@@ -213,7 +217,12 @@ export function ownPreparedPluginGeneration(
     void lifetime.close().catch(() => {});
     throw error;
   }
-  generations.set(generation, lifetime);
+  // Catalog work may acquire and release this generation before its first publication.
+  // Construction remains its owner until publication takes custody or the build discards it.
+  generations.set(generation, {
+    lifetime,
+    ...(options.unpublished ? { releaseUnpublished: lifetime.retain() } : {}),
+  });
   return lifetime;
 }
 
@@ -256,6 +265,10 @@ export function publishPreparedPluginGeneration(
   if (owner.provenance === "configured") {
     configuredPreparedPluginGenerations.add(generation);
   }
+  const construction = generations.get(generation)!;
+  const releaseUnpublished = construction.releaseUnpublished;
+  construction.releaseUnpublished = undefined;
+  void releaseUnpublished?.();
   const version = owner.generation;
   const gatewayLenders = new Set<PluginRegistry>();
   let signal: AbortSignal | undefined;
@@ -335,9 +348,15 @@ export function releasePreparedPluginPublication(owner: object): void {
 export async function discardPreparedPluginGeneration(
   generation: PreparedModelRuntimePluginGeneration,
 ): Promise<void> {
-  const lifetime = generations.get(generation);
-  if (lifetime && !lifetime.referenced) {
-    await lifetime.close();
+  const construction = generations.get(generation);
+  if (!construction) {
+    return;
+  }
+  const releaseUnpublished = construction.releaseUnpublished;
+  construction.releaseUnpublished = undefined;
+  await releaseUnpublished?.();
+  if (!construction.lifetime.referenced) {
+    await construction.lifetime.close();
   }
 }
 

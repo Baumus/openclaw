@@ -58,10 +58,15 @@ export function isCurrentCoreFailureRecoveryEligible(
     serviceStop: PreManagedServiceStop | undefined;
   },
 ): boolean {
+  // Only an explicit false proves that no mutation started; unknown runtime input refuses.
+  switch (params.mutationStarted) {
+    case false:
+      break;
+    default:
+      return false;
+  }
   return (
     params.coreAlreadyCurrent === true &&
-    // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare -- Unknown runtime input must not authorize restoration.
-    params.mutationStarted === false &&
     !params.packageTransaction &&
     !params.databaseBackup &&
     !params.rollbackBlockedReason &&
@@ -186,9 +191,14 @@ export function isUntouchedFailureRecovery(
     "gatewayStartAttempted" | "definitionRecovery" | "rollbackAttempted"
   >,
 ): boolean {
+  // Unknown mutation history must retain recovery probing.
+  switch (params.mutationStarted) {
+    case false:
+      break;
+    default:
+      return false;
+  }
   return (
-    // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare -- Unknown runtime input must retain recovery probing.
-    params.mutationStarted === false &&
     !params.rollbackBlockedReason &&
     !params.preManagedServiceStop?.stopped &&
     !serviceStop?.stopped &&

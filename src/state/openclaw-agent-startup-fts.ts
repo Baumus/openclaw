@@ -7,10 +7,8 @@ import {
 import { requestSqliteWorkerOperationAdmission } from "../infra/sqlite-worker-operation-admission.js";
 import { readAgentDeletionJournalStatusInDatabase } from "./agent-deletion-journal.read.js";
 import { mayShareAgentDatabaseFile } from "./openclaw-agent-db-lease-provenance.js";
-import {
-  readActiveOpenClawAgentDatabaseLeasesReadOnly,
-  type OpenClawAgentDatabaseWorkerLeaseReceipt,
-} from "./openclaw-agent-db-lease.js";
+import { readActiveOpenClawAgentDatabaseLeasesReadOnly } from "./openclaw-agent-db-lease.js";
+import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.types.js";
 import { AGENT_FTS_SCHEMAS } from "./openclaw-agent-fts-schema.js";
 import { runOpenClawStateWriteTransaction } from "./openclaw-state-db.js";
 

@@ -64,9 +64,9 @@ import {
   claimOpenClawAgentDatabaseLease,
   recordOpenClawAgentDatabaseAdmission,
   releaseOpenClawAgentDatabaseLease,
-  type OpenClawAgentIntegrityVerificationReceiver,
   type prepareOpenClawAgentDatabaseWorkerLease,
 } from "./openclaw-agent-db-lease.js";
+import type { OpenClawAgentIntegrityVerificationReceiver } from "./openclaw-agent-db-lease.types.js";
 import {
   agentDatabaseLifecycle as cache,
   startAgentDatabaseOpenTiming,

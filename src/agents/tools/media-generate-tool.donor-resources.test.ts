@@ -28,6 +28,7 @@ import { prepareWorkspaceBuildGroup } from "../prepared-model-runtime.facts.js";
 import { createPreparedModelRuntimeSnapshot } from "../prepared-model-runtime.full-catalog.js";
 import { closePreparedModelRuntimeSnapshots } from "../prepared-model-runtime.lifecycle.js";
 import {
+  discardPreparedPluginGeneration,
   retainPreparedPluginGeneration,
   retainPreparedPluginRegistry,
 } from "../prepared-model-runtime.plugin-lifetime.js";
@@ -231,6 +232,7 @@ module.exports = { id: '${id}', register(api) {
             await rollbackDisposal.promise;
           }
           releasePublication = retainPreparedPluginGeneration(prepared.pluginGeneration);
+          await discardPreparedPluginGeneration(prepared.pluginGeneration);
           const facts = prepared.agentFacts[0]!;
           const catalog = prepareConfiguredRuntimeFacts({
             agentFacts: facts,

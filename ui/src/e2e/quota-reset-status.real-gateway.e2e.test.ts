@@ -357,9 +357,17 @@ describe.each(["automatic", "saved-clear", "automatic-during-catalog"] as const)
           const inference = provider.requests
             .slice(beforeRecovery)
             .filter((request) => request.path.endsWith("/responses"));
-          const primaryInference = inference.filter(({ body }) => {
+          const primaryInference = inference.filter(({ body, transport }) => {
             const request: unknown = JSON.parse(body ?? "{}");
-            return isRecord(request) && request.model === "gpt-5.5";
+            return (
+              isRecord(request) &&
+              request.model === "gpt-5.5" &&
+              !(
+                transport === "websocket" &&
+                request.type === "response.create" &&
+                request.generate === false
+              )
+            );
           });
           observations.push({ action: "next-ordinary-turn", result: nextTurn, state: stats() });
           expect.soft(nextTurn, evidence()).toEqual({ status: "ok", output: [MARKER] });

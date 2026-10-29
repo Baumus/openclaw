@@ -22,6 +22,7 @@ import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { resolveUsableCustomProviderApiKey } from "./model-auth-provider-config.js";
 import { createPreparedModelCatalogWorkerInput } from "./prepared-model-catalog-worker.js";
 import { prepareWorkspaceBuildGroup } from "./prepared-model-runtime.facts.js";
+import { discardPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
 import { prepareAgentCatalogSource } from "./prepared-model-runtime.scoped-catalog.js";
 import { createCatalogInspectionPool } from "./test-helpers/prepared-model-catalog-inspection.js";
 
@@ -211,6 +212,9 @@ module.exports = {
           ],
           "static",
         );
+        await using _ = {
+          [Symbol.asyncDispose]: () => discardPreparedPluginGeneration(prepared.pluginGeneration),
+        };
         expect(requests).toEqual([]);
         const authStore: AuthProfileStore = {
           version: 1,

@@ -13,7 +13,10 @@ import {
 import { createCatalogFixture, PROVIDER_ID } from "./prepared-model-catalog-worker.test-support.js";
 import { getPreparedModelFullCatalogAuth } from "./prepared-model-runtime-auth.js";
 import { prepareWorkspaceBuildGroup } from "./prepared-model-runtime.facts.js";
-import { retainPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
+import {
+  discardPreparedPluginGeneration,
+  retainPreparedPluginGeneration,
+} from "./prepared-model-runtime.plugin-lifetime.js";
 import { usePreparedCatalogWorkerFixtures } from "./test-helpers/prepared-model-catalog-worker-fixture.js";
 
 const { makeTempDir, retireAfterTest } = usePreparedCatalogWorkerFixtures();
@@ -123,6 +126,7 @@ module.exports = {
         "static",
       );
       retireAfterTest(retainPreparedPluginGeneration(prepared.pluginGeneration));
+      await discardPreparedPluginGeneration(prepared.pluginGeneration);
       const createWorker = (agentFacts: (typeof prepared.agentFacts)[number]) =>
         createPreparedModelCatalogWorker({
           agentFacts,

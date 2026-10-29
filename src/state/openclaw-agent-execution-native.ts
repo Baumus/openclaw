@@ -30,7 +30,7 @@ import {
 } from "./agent-database-admission.js";
 import { createAgentDatabaseStartupFtsAdmission } from "./agent-database-startup-fts.js";
 import { captureAgentDeletionCleanupAdmission } from "./agent-deletion-cleanup-admission.js";
-import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.js";
+import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.types.js";
 import {
   captureOpenClawAgentDatabaseRegistration,
   settleAgentRegistration,

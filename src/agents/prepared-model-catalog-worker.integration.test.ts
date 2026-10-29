@@ -57,7 +57,10 @@ import {
   getPreparedModelRuntimeSnapshot,
   refreshPreparedModelRuntimeSnapshots,
 } from "./prepared-model-runtime.js";
-import { retainPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
+import {
+  discardPreparedPluginGeneration,
+  retainPreparedPluginGeneration,
+} from "./prepared-model-runtime.plugin-lifetime.js";
 import { AuthStorage } from "./sessions/auth-storage.js";
 import { withHeldCatalogOAuthRefresh } from "./test-helpers/prepared-model-catalog-oauth-fixture.js";
 import { createStaticCatalogSnapshotFixture } from "./test-helpers/prepared-model-catalog-static-fixture.js";
@@ -158,6 +161,7 @@ describe("prepared model catalog worker boundary", () => {
     try {
       const result = (await build.pending)[0]!;
       retireAfterTest(retainPreparedPluginGeneration(result.pluginGeneration));
+      await discardPreparedPluginGeneration(result.pluginGeneration);
       snapshot = result.snapshot;
       const modelCatalog = await loadCompletedFullCatalog(snapshot);
       expect(modelCatalog.entries).toContainEqual(

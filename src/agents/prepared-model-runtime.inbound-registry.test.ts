@@ -37,7 +37,10 @@ import {
   rejectPendingPreparedModelRuntimeReplacement,
   type PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.js";
-import { retainPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
+import {
+  discardPreparedPluginGeneration,
+  retainPreparedPluginGeneration,
+} from "./prepared-model-runtime.plugin-lifetime.js";
 
 const fixture = usePreparedModelRuntimeHarness({ label: "prepared-model-runtime" });
 const { mocks } = fixture;
@@ -568,6 +571,7 @@ it("refreshes successor discovery auth after the preceding runtime registry reti
     metadata,
   );
   const releasePrevious = retainPreparedPluginGeneration(first.pluginGeneration);
+  await discardPreparedPluginGeneration(first.pluginGeneration);
   let releaseSuccessor: (() => Promise<void>) | undefined;
   try {
     expect(first.agentFacts[0]?.credentials["discovery-auth"]).toMatchObject({
@@ -585,6 +589,7 @@ it("refreshes successor discovery auth after the preceding runtime registry reti
       first.pluginGeneration.pluginRegistry,
     );
     releaseSuccessor = retainPreparedPluginGeneration(replacement.pluginGeneration);
+    await discardPreparedPluginGeneration(replacement.pluginGeneration);
     await releasePrevious();
     expect(previous.instance.lifecycle.signal.aborted).toBe(true);
     const refreshed = await prepareWorkspaceBuildGroup(

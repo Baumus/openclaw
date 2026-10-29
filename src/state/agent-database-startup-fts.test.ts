@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { readDatabasePathIdentitySync } from "../infra/sqlite-worker-identity.js";
 import {
@@ -9,7 +9,9 @@ import {
 } from "./agent-database-startup-fts.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 
-const roots = useAutoCleanupTempDirTracker(afterEach);
+// The process-wide attempt latch retains physical identities. Keep fixture files alive
+// across tests so Linux cannot recycle an earlier fixture's inode into a new one.
+const roots = useAutoCleanupTempDirTracker(afterAll);
 afterEach(() => vi.unstubAllEnvs());
 function fixture() {
   const root = roots.make("startup-fts-authority-");

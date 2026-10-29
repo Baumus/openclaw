@@ -5,6 +5,7 @@ import { describe, expect, it, vi, onTestFinished } from "vitest";
 import { stripAnsi } from "../../packages/terminal-core/src/ansi.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
+import * as containerEnvironment from "../infra/container-environment.js";
 import type { UpdateRunResult } from "../infra/update-runner-types.js";
 import { flushLogger, resetLogger, setLoggerOverride } from "../logging/logger.js";
 import { CLAWHUB_INSTALL_ERROR_CODE } from "../plugins/clawhub-error-codes.js";
@@ -55,11 +56,6 @@ import {
   pluginSyncResult,
   stableConfig,
 } from "./update-cli/update-cli-config.test-support.js";
-import {
-  mockUnbuiltRecoveryFixture,
-  recoveryVerificationStep,
-  recoveryVersionMismatch,
-} from "./update-cli/update-cli-failure-recovery.test-support.js";
 import {
   writeJsonFixture,
   writeOpenClawPackageFixture,
@@ -237,6 +233,8 @@ describe("update-cli", () => {
   it.each([{ source: "bridge", mode: "finalize" }] as const)(
     "completes $mode with a plugin retry notice when $source awaits capability consent",
     async ({ source, mode }) => {
+      // This case owns a native service; container service discovery is a separate contract.
+      vi.spyOn(containerEnvironment, "isContainerEnvironment").mockReturnValue(false);
       const pluginId = "consent-fixture";
       const config = stableConfig({ plugins: { entries: { [pluginId]: { enabled: true } } } });
       vi.mocked(readConfigFileSnapshot).mockResolvedValue(configSnapshot(config));
@@ -566,7 +564,6 @@ describe("update-cli", () => {
   it.each([["npm update", updateNpmInstalledPlugins]] as const)(
     "fails unexpected post-core %s exceptions",
     async (phase, updatePlugins) => {
-      await mockUnbuiltRecoveryFixture();
       const message = `${phase} invariant broke`;
       updatePlugins.mockRejectedValueOnce(new Error(message));
 
@@ -577,9 +574,22 @@ describe("update-cli", () => {
         reason: "post-update-failed",
         steps: [
           expect.objectContaining({ exitCode: 1, stderrTail: message }),
-          recoveryVerificationStep([recoveryVersionMismatch]),
+          {
+            name: "gateway recovery observation",
+            command: "gateway verification",
+            cwd: process.cwd(),
+            durationMs: 0,
+            exitCode: 0,
+            diagnostics: [
+              "No recovery needed; still serving the previous version. No service was stopped or started.",
+            ],
+          },
         ],
       });
+      // The fixture never enters core mutation and has no managed service to recover.
+      expect(lastWriteJsonCall()).toHaveProperty("verification", {});
+      expect(serviceStop).not.toHaveBeenCalled();
+      expect(freshRestartCalls()).toHaveLength(0);
     },
   );
   it("preserves convergence diagnostic output", async () => {

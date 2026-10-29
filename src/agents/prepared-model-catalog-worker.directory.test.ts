@@ -20,7 +20,10 @@ import {
   REF_ONLY_TOKEN_ENV,
 } from "./prepared-model-catalog-worker.test-support.js";
 import { prepareWorkspaceBuildGroup } from "./prepared-model-runtime.facts.js";
-import { retainPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
+import {
+  discardPreparedPluginGeneration,
+  retainPreparedPluginGeneration,
+} from "./prepared-model-runtime.plugin-lifetime.js";
 import { createCatalogInspectionPool } from "./test-helpers/prepared-model-catalog-inspection.js";
 import { usePreparedCatalogWorkerFixtures } from "./test-helpers/prepared-model-catalog-worker-fixture.js";
 
@@ -53,6 +56,7 @@ describe("catalog request existing directory ownership", () => {
       "static",
     );
     retireAfterTest(retainPreparedPluginGeneration(prepared.pluginGeneration));
+    await discardPreparedPluginGeneration(prepared.pluginGeneration);
     const value = createPreparedModelCatalogWorkerInput({
       agentFacts: prepared.agentFacts[0]!,
       pluginMetadataSnapshot: prepared.pluginGeneration.pluginMetadataSnapshot,
@@ -127,6 +131,7 @@ describe("catalog request existing directory ownership", () => {
       "static",
     );
     retireAfterTest(retainPreparedPluginGeneration(prepared.pluginGeneration));
+    await discardPreparedPluginGeneration(prepared.pluginGeneration);
     const value = structuredClone(
       createPreparedModelCatalogWorkerInput({
         agentFacts: prepared.agentFacts[0]!,

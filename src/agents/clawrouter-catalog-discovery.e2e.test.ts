@@ -24,6 +24,7 @@ import type {
   PreparedModelWorkerResult,
 } from "./prepared-model-catalog-worker.types.js";
 import { prepareWorkspaceBuildGroup } from "./prepared-model-runtime.facts.js";
+import { discardPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
 
 describe("ClawRouter cold prepared catalog", () => {
   let state: OpenClawTestState;
@@ -159,6 +160,9 @@ describe("ClawRouter cold prepared catalog", () => {
     const prepared = await prepareWorkspaceBuildGroup([input], "static", {
       preferBuiltPluginArtifacts: true,
     });
+    await using _ = {
+      [Symbol.asyncDispose]: () => discardPreparedPluginGeneration(prepared.pluginGeneration),
+    };
     const metadata = prepared.pluginGeneration.pluginMetadataSnapshot;
     // The local catalog server stands in for the provider-owned endpoint. Match the
     // fixture's manifest route to that endpoint without relaxing production policy.

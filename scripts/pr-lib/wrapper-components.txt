@@ -636,6 +636,7 @@ src/config/sessions/cli-session-binding.ts
 src/config/sessions/session-incognito-side-data-contract.ts
 src/config/sessions/session-row-facts.types.ts
 src/config/sessions/session-incognito-transcript-contract.ts
+src/state/agent-database-startup-fts.ts
 src/state/artifact-preserving-state-reads.ts
 src/state/incognito-session-error.ts
 src/config/sessions/session-model-context-projection.ts
@@ -1656,6 +1657,7 @@ src/state/openclaw-agent-db-discovery-paths.ts
 src/state/openclaw-agent-db-disposal.ts
 src/state/openclaw-agent-db-existing-write.ts
 src/state/openclaw-agent-db-identity.ts
+src/state/openclaw-agent-db-integrity-driver.ts
 src/state/openclaw-agent-db-lease-provenance.ts
 src/state/openclaw-agent-db-lease.ts
 src/state/openclaw-agent-db-legacy-schema.ts
@@ -1704,6 +1706,7 @@ src/state/openclaw-agent-native-stop-observation.ts
 src/state/openclaw-agent-participants-migration.ts
 src/state/openclaw-agent-pending-inputs-schema.ts
 src/state/openclaw-agent-progress-card-schema.ts
+src/state/openclaw-agent-registration-observer.ts
 src/state/openclaw-agent-schema-inspection-response.ts
 src/state/openclaw-agent-schema-inspection-worker.ts
 src/state/openclaw-agent-schema.sql
@@ -1814,6 +1817,7 @@ src/state/openclaw-state-worker-error-identity.ts
 src/state/openclaw-state-worker-error.ts
 src/state/openclaw-state-worker-lease.ts
 src/state/openclaw-state-worker-memory-pressure.ts
+src/state/openclaw-state-worker-operation-retainer.ts
 src/state/openclaw-state-worker-operation.ts
 src/state/openclaw-state-worker-owner.ts
 src/state/openclaw-state-worker-owner-get.ts

@@ -7,7 +7,6 @@ import { resolveConfigPath } from "../config/paths.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import * as serviceMembership from "../daemon/service-process-membership.js";
 import type { UpdateRunResult } from "../infra/update-runner-types.js";
-import * as versionManagerPath from "../shared/version-manager-path.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { VERSION } from "../version.js";
 import {
@@ -183,8 +182,22 @@ describe("update-cli", () => {
           reason: "post-update-plugins",
           ...(failure === "changed owner"
             ? {}
-            : { run: { verification: { serviceRunning: false } } }),
+            : {
+                run: {
+                  verification: {
+                    recovery: {
+                      serviceRestartSafe: false,
+                      reason: "runtime-verification-failed",
+                    },
+                  },
+                },
+              }),
         });
+        if (failure === "stop") {
+          // Failed restoration publishes its refusal, not an unobserved runtime state.
+          expect(lastWriteJsonCall()).not.toHaveProperty("run.verification.serviceRunning");
+          expect(JSON.stringify(lastWriteJsonCall())).toContain("listener check failed after stop");
+        }
         return;
       }
       await updateCommand({ yes: true, restart: true, json: true });
@@ -265,8 +278,8 @@ describe("update-cli", () => {
 
   it("refuses a current Git core with an incompatible before-only version receipt", async () => {
     runtimeRecovery.stubNodeRuntime();
-    // This case specifies system-runtime guidance, independent of the host Node manager.
-    vi.spyOn(versionManagerPath, "resolveNodeVersionManager").mockReturnValue("system");
+    // This case specifies native system-runtime guidance, not container deployment.
+    runtimeRecovery.mockNonContainerSystemRuntime();
     const fixture = runtimeRecovery.currentGitCoreFixture(process.cwd(), VERSION);
     readPackageVersion.mockResolvedValue(VERSION);
     vi.mocked(updateGitCheckout).mockResolvedValueOnce(fixture.outcome);

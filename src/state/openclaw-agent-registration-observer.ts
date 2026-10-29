@@ -1,6 +1,6 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { SqliteWorkerAdmissionRequest } from "../infra/sqlite-worker-operation-admission.js";
-import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.js";
+import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.types.js";
 import type { AgentDatabaseRegistration } from "./openclaw-agent-db-registry-listing.js";
 
 /** Observe a witnessed registration commit without reopening revoked admission. */

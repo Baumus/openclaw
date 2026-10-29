@@ -53,7 +53,6 @@ import {
   runDaemonInstall,
   runDaemonRestart,
 } from "./update-cli-modules.test-support.js";
-import { recoveryVerificationStep } from "./update-cli/update-cli-failure-recovery.test-support.js";
 import { writeOpenClawPackageFixture } from "./update-cli/update-cli-package.test-support.js";
 
 await vi.hoisted(() => import("./update-cli-mocks.test-support.js"));
@@ -363,18 +362,19 @@ describe("update-cli", () => {
         expect.objectContaining({
           stderrTail: expect.stringContaining("would kill this command"),
         }),
-        recoveryVerificationStep(
-          [
-            {
-              check: "versionMatch",
-              code: "build-id-mismatch",
-              message: "Expected Gateway build fixture-original-build; observed unavailable.",
-            },
+        {
+          name: "gateway recovery observation",
+          command: "gateway verification",
+          cwd: root,
+          durationMs: 0,
+          exitCode: 0,
+          diagnostics: [
+            "No recovery needed; still serving the previous version. No service was stopped or started.",
           ],
-          root,
-        ),
+        },
       ],
     });
+    expect(lastWriteJsonCall()).toHaveProperty("verification", {});
     expect(mutationAdmitted).not.toHaveBeenCalled();
     expectNoSideEffects(serviceStop, serviceStart, serviceRestart);
     expect(freshRestartCalls()).toHaveLength(0);

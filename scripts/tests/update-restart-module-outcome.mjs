@@ -297,6 +297,8 @@ async function fixture({
     "update-command-legacy-service-stop",
     // Recovery and reporting stay real; only their I/O uses finite fixture facts.
     "update-command-failure-recovery",
+    "update-command-current-core-recovery",
+    "update-command-current-core-restoration",
     "update-command-service-recovery",
     "update-command-plugins-internals",
     "../../process/exec-result",

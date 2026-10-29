@@ -23,8 +23,8 @@ import { createDeferredCore } from "../../shared/deferred.js";
 import {
   claimOpenClawAgentDatabaseLease,
   releaseOpenClawAgentDatabaseLease,
-  type OpenClawAgentDatabaseWorkerLeaseReceipt,
 } from "../../state/openclaw-agent-db-lease.js";
+import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "../../state/openclaw-agent-db-lease.types.js";
 import {
   getOpenClawAgentDatabaseValidation,
   getOpenClawAgentDatabaseValidationForTransfer,

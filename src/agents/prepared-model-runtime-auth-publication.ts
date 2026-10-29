@@ -266,7 +266,9 @@ export class PreparedModelRuntimeAuthPublicationOwner {
       const components = partitionAuthMutationOwners(this.#events.splice(0));
       for (const componentOwners of components) {
         const owners = componentOwners.filter(
-          (owner) => params.owners.get(ownerKey(owner.input)) === owner,
+          (owner) =>
+            params.owners.get(ownerKey(owner.input)) === owner &&
+            (!this.#transaction?.ownerGates.get(owner)?.retried || owner.needsRefresh),
         );
         const reusedOwners = new Set(
           owners.filter((owner) => owner.pluginGeneration !== undefined),

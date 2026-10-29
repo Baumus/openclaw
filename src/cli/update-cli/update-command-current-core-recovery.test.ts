@@ -10,6 +10,7 @@ import { createUpdateRun, recordUpdateRunVerification } from "../../infra/update
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import {
   isCurrentCoreFailureRecoveryEligible,
+  isUntouchedFailureRecovery,
   assertCurrentCoreRecoveryRisk,
 } from "./update-command-current-core-recovery.js";
 import { captureRestorationRisk } from "./update-command-current-core-recovery.test-support.js";
@@ -100,6 +101,25 @@ it.each([
   }
   expect(isCurrentCoreFailureRecoveryEligible(params, state)).toBe(scenario === "positive");
 });
+
+it.each([false, true, undefined, null, 0, ""])(
+  "requires explicit no-mutation evidence for recovery: %s",
+  (mutationStarted) => {
+    const params = createPostUpdateRepairFixture(dirs.make("current-core-mutation-"));
+    params.coreAlreadyCurrent = true;
+    params.rollbackBlockedReason = undefined;
+    Reflect.set(params, "mutationStarted", mutationStarted);
+    const state = {
+      rollbackAttempted: false,
+      definitionRecovery: {},
+      gatewayStartAttempted: undefined,
+      serviceStop: params.preManagedServiceStop,
+    };
+    expect(isCurrentCoreFailureRecoveryEligible(params, state)).toBe(mutationStarted === false);
+    params.preManagedServiceStop = undefined;
+    expect(isUntouchedFailureRecovery(params, undefined, state)).toBe(mutationStarted === false);
+  },
+);
 
 it.each([
   "healthy",
