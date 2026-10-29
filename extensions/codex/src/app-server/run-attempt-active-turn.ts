@@ -337,7 +337,7 @@ export function activateCodexAttemptTurn(
     workspaceOnly,
     localRoots: workspaceOnly
       ? undefined
-      : getAgentScopedMediaLocalRoots(params.config ?? {}, sessionAgentId),
+      : getAgentScopedMediaLocalRoots(params.config ?? {}, sessionAgentId, params.workspaceDir),
     sandbox:
       connection.sandbox?.enabled && connection.sandbox.fsBridge
         ? { root: connection.sandbox.workspaceDir, bridge: connection.sandbox.fsBridge }
