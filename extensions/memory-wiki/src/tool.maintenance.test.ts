@@ -5,8 +5,14 @@ import { createWikiSearchTool } from "./tool.js";
 
 const mocks = vi.hoisted(() => ({ bridge: vi.fn(), refresh: vi.fn(), query: vi.fn() }));
 // Keep the real source-sync coordinator; control only importer/compiler I/O.
-vi.mock("./bridge.js", () => ({ syncMemoryWikiBridgeSources: mocks.bridge }));
-vi.mock("./compile.js", () => ({ refreshMemoryWikiIndexesAfterImport: mocks.refresh }));
+vi.mock("./bridge.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./bridge.js")>()),
+  syncMemoryWikiBridgeSources: mocks.bridge,
+}));
+vi.mock("./compile.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./compile.js")>()),
+  refreshMemoryWikiIndexesAfterImport: mocks.refresh,
+}));
 vi.mock("./query.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./query.js")>()),
   searchMemoryWiki: mocks.query,
