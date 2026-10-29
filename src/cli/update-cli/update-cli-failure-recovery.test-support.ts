@@ -6,17 +6,8 @@ import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import type { runUpdateFailureTriage as RunUpdateFailureTriage } from "../../infra/update-triage.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import type { TempHomeEnv } from "../../test-utils/temp-home.js";
-import { VERSION } from "../../version.js";
 import type { updateFinalizeCommand as UpdateFinalizeCommand } from "./update-command-finalize.js";
 import type { updateCommand as UpdateCommand } from "./update-command.js";
-
-export async function mockUnbuiltRecoveryFixture(): Promise<void> {
-  // These fixtures must not inherit build identity from the checkout's generated dist.
-  vi.spyOn(
-    await import("../../infra/update-git-runtime.js"),
-    "readBuiltGatewayBuildId",
-  ).mockResolvedValue(null);
-}
 
 export const recoveryVerificationStep = (
   failureFacts?: UpdateRunResult["steps"][number]["failureFacts"],
@@ -29,11 +20,6 @@ export const recoveryVerificationStep = (
   exitCode: failureFacts ? 1 : 0,
   ...(failureFacts ? { failureFacts } : {}),
 });
-export const recoveryVersionMismatch = {
-  check: "versionMatch",
-  code: "version-mismatch",
-  message: `Expected Gateway version ${VERSION}; observed 1.0.0.`,
-};
 export function registerFailureSelectorTests({
   updateCommand,
   updateFinalizeCommand,

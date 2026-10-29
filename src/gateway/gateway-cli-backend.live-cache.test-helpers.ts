@@ -367,7 +367,9 @@ export async function verifyCliBackendAnnounceOrdering({
       (record) => extractTextFromChatContent(record.content, { joinWith: "" }) ?? "",
     );
     const parentIndex = replies.findIndex((reply) => reply.includes(announceParentToken));
-    const completionIndex = replies.findIndex((reply) => reply.includes(announceChildToken));
+    const completionIndex = replies.findIndex(
+      (reply, index) => index > parentIndex && reply.includes(announceChildToken),
+    );
     return parentIndex >= 0 && completionIndex >= 0
       ? { parentReplyIndex: parentIndex, completionReplyIndex: completionIndex }
       : undefined;
