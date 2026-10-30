@@ -521,6 +521,10 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
     ...(params.sessionKey
       ? {
           agentHarnessCompletionScope: createAgentHarnessCompletionScope({
+            run: {
+              instance: params.admittedRunContext.operationalRunInstance,
+              assertCurrent: assertActiveRun,
+            },
             requesterSessionKey: params.sessionKey,
             requesterAgentId: workspaceResolution.agentId,
             gatewayContextResolver: getGatewayContextResolver(params.admittedRunContext),

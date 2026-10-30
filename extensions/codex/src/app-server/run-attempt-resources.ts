@@ -1,3 +1,4 @@
+import { registerAgentHarnessCompletionHandoff } from "openclaw/plugin-sdk/agent-harness-completion";
 import type { AgentHarnessRuntimeArtifactBinding } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { captureSessionEntryCurrentCheckAsync } from "openclaw/plugin-sdk/session-binding-runtime";
 import { isIncognitoSessionKey } from "openclaw/plugin-sdk/session-key-runtime";
@@ -337,7 +338,14 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
             nativeHookRelay?.rejectPendingDirectChild(childThreadId, reason),
           ...(params.sessionKey && params.agentHarnessCompletionScope
             ? {
-                onDirectChildAccepted: () => {
+                onDirectChildAccepted: (handoff) => {
+                  if (handoff?.completionCustody) {
+                    registerAgentHarnessCompletionHandoff({
+                      scope: params.agentHarnessCompletionScope!,
+                      completionCustody: handoff.completionCustody,
+                      runId: handoff.runId,
+                    });
+                  }
                   state.runtimeContinuationStarted = true;
                 },
               }
