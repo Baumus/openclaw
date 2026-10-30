@@ -44,7 +44,9 @@ export function createAgentHarnessCompletionScope(params: {
     requesterAgentId,
   };
   scopeRegistry.hostIssuedScopes.add(scope);
-  if (params.run) scopeRegistry.runs.set(scope, params.run);
+  if (params.run) {
+    scopeRegistry.runs.set(scope, params.run);
+  }
   bindGatewayContextResolver(scope, params.gatewayContextResolver);
   return scope;
 }
@@ -128,7 +130,9 @@ export function recordAgentHarnessCompletionHandoff(
 ): void {
   assertAgentHarnessCompletionScope(scope);
   const run = scopeRegistry.runs.get(scope);
-  if (!run) return;
+  if (!run) {
+    return;
+  }
   run.assertCurrent();
   const handoffs = scopeRegistry.handoffs.get(run.instance) ?? new Map<string, () => boolean>();
   handoffs.set(runId, () => {

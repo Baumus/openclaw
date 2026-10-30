@@ -23,8 +23,28 @@ vi.mock("../gateway/server-plugin-in-process-dispatch.js", () => ({
 vi.mock("../process/gateway-work-admission.js", () => ({
   retainGatewayRootWorkAdmissionContinuationScope: () => undefined,
 }));
-vi.mock("./subagents/announce/subagent-announce-delivery.js", () => ({
-  loadRequesterSessionEntry: () => ({ entry: { sessionId: "session", lifecycleRevision: "one" } }),
+// mock-isolation: Gateway execution tracking and requester storage are external IO;
+// custody creation, ownership checks, acceptance registration, and settlement stay real.
+vi.mock("../plugins/runtime/gateway-request-scope.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../plugins/runtime/gateway-request-scope.js")>()),
+  getInProcessGatewayRequestContext: () => ({
+    trackExecution: async <T>(run: () => Promise<T>) => run(),
+    logGateway: { warn: vi.fn() },
+  }),
+}));
+vi.mock("./subagents/announce/subagent-announce-delivery.runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("./subagents/announce/subagent-announce-delivery.runtime.js")
+  >()),
+  captureRequesterSessionEntryCurrent: async () => ({
+    readCurrent: () => ({ sessionId: "session", lifecycleRevision: "one" }),
+    release() {},
+  }),
+  withSubagentRequesterSource: async <T>(
+    _key: string,
+    _agentId: string | undefined,
+    consume: (isCurrent?: () => boolean) => Promise<T>,
+  ) => consume(),
 }));
 vi.mock("./subagents/registry/subagent-registry.js", () => ({
   markRequesterTurnYielded: vi.fn(),
@@ -37,14 +57,18 @@ async function fixture() {
   state.currentInstance = instance;
   let active = true;
   const assertCurrent = () => {
-    if (!active) throw new Error("requester replaced");
+    if (!active) {
+      throw new Error("requester replaced");
+    }
   };
   const scope = createAgentHarnessCompletionScope({
     requesterSessionKey: "agent:main:main",
     run: { instance, assertCurrent },
   });
   const custody = await captureAgentHarnessCompletionCustody(scope);
-  if (!custody) throw new Error("missing custody");
+  if (!custody) {
+    throw new Error("missing custody");
+  }
   return {
     admission,
     instance,
@@ -72,12 +96,13 @@ describe("native completion handoff", () => {
     async (kind) => {
       const f = await fixture();
       try {
-        if (kind !== "no-work")
+        if (kind !== "no-work") {
           registerAgentHarnessCompletionHandoff({
             scope: f.scope,
             completionCustody: f.custody,
             runId: "native-child:turn-two",
           });
+        }
         const result: EmbeddedAgentRunResult = {
           meta: {
             durationMs: 1,
@@ -87,8 +112,12 @@ describe("native completion handoff", () => {
             ...(kind === "implicit" ? { continuationPending: true } : {}),
           },
         };
-        if (kind === "released-after-acceptance") f.custody.release();
-        if (kind === "revoked-after-acceptance") f.revoke();
+        if (kind === "released-after-acceptance") {
+          f.custody.release();
+        }
+        if (kind === "revoked-after-acceptance") {
+          f.revoke();
+        }
         const admission =
           kind === "wrong-run"
             ? prepareSystemAgentRunAdmission({}, "requester", "main", "other-native-handoff-test")
@@ -116,8 +145,12 @@ describe("native completion handoff", () => {
     async (kind) => {
       const f = await fixture();
       try {
-        if (kind === "released") f.custody.release();
-        if (kind === "revoked") f.revoke();
+        if (kind === "released") {
+          f.custody.release();
+        }
+        if (kind === "revoked") {
+          f.revoke();
+        }
         const scope =
           kind === "copied-scope"
             ? { ...f.scope }

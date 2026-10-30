@@ -379,7 +379,9 @@ export function registerAgentHarnessCompletionHandoff(params: {
 }): void {
   const scope = assertAgentHarnessCompletionScope(params.scope);
   const runId = params.runId.trim();
-  if (!runId) throw new Error("Harness completion handoff requires an assignment run ID");
+  if (!runId) {
+    throw new Error("Harness completion handoff requires an assignment run ID");
+  }
   getCompletionOwner(params.completionCustody, scope).run(() => {
     recordAgentHarnessCompletionHandoff(scope, runId, () =>
       isAgentHarnessCompletionCustodyCurrent(params.completionCustody, scope),

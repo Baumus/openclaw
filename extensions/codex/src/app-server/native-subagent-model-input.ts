@@ -1,6 +1,9 @@
 import { readStringField as readString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { codexNativeSubagentRunId } from "./native-subagent-assignment.js";
-import { readThreadParentThreadId, readThreadSpawnSource } from "./native-subagent-assignment.js";
+import {
+  codexNativeSubagentRunId,
+  readThreadParentThreadId,
+  readThreadSpawnSource,
+} from "./native-subagent-assignment.js";
 import { resolveNativeModelParentOwner } from "./native-subagent-model-lookup.js";
 import {
   createNativeModelSourceOwner,
