@@ -105,11 +105,17 @@ it("keeps an interrupted assignment resumable without pinning its restored paren
   await retainCodexAppServerLiveThread(client.client, binding.threadId);
   const continued = await registerParent(monitor, binding.threadId, "agent:main:main");
   await client.notify(turnStartedNotification("continued-turn"));
-  await expect(releaseForResume()).rejects.toThrow("claimed by active work; stop it first");
+  let released = false;
+  const release = releaseForResume().then((result) => {
+    released = true;
+    return result;
+  });
+  await Promise.resolve();
+  expect(released).toBe(false);
   await client.notify(
     childTurnCompletedNotification({ turnId: "continued-turn", status: "interrupted" }),
   );
-  await expect(releaseForResume()).resolves.toBe(true);
+  await expect(release).resolves.toBe(true);
   expect(store.readNativeSubagentAssignments?.(identity, historyOwner)).toHaveLength(1);
   await continued.unregister();
 });
@@ -150,14 +156,20 @@ it("permits parent cold resume once every child is terminal, while preserving un
     nativeCompletionNotification({ agentPath: "child-a", result: "first result" }),
   );
   // A still-running sibling requires the native parent subscription to remain alive.
-  await expect(releaseForResume()).rejects.toThrow("claimed by active work; stop it first");
+  let released = false;
+  const release = releaseForResume().then((result) => {
+    released = true;
+    return result;
+  });
+  await Promise.resolve();
+  expect(released).toBe(false);
   expect(client.request.mock.calls.some(([method]) => method === "thread/unsubscribe")).toBe(false);
 
   await client.notify(
     nativeCompletionNotification({ agentPath: "child-b", result: "second result" }),
   );
   expect(runtime.deliverAgentHarnessCompletion).toHaveBeenCalledTimes(2);
-  await expect(releaseForResume()).resolves.toBe(true);
+  await expect(release).resolves.toBe(true);
   expect(client.request).toHaveBeenCalledWith(
     "thread/unsubscribe",
     { threadId: "parent-thread" },

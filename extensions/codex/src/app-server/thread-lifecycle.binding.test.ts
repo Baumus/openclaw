@@ -14,6 +14,7 @@ import {
   isCodexAppServerLiveThreadClaimed,
   retainCodexAppServerLiveThread,
 } from "./client-runtime.js";
+import * as clientRuntime from "./client-runtime.js";
 import { CodexAppServerClient, CodexAppServerRpcError } from "./client.js";
 import { createFakeCodexAppServerClient } from "./codex-app-server.test-fixtures.js";
 import { acquireCodexNativeConfigFence } from "./native-config-fence.js";
@@ -1025,6 +1026,55 @@ describe("Codex app-server thread lifecycle bindings", () => {
     expect(request.mock.calls.find(([method]) => method === "thread/resume")?.[1]).toMatchObject({
       config: { "features.image_generation": false },
     });
+  });
+
+  it("resumes changed policy after child settlement while holding the lifecycle binding lease", async () => {
+    const sessionFile = path.join(tempDir, "protected-policy-session.jsonl");
+    const workspaceDir = path.join(tempDir, "protected-policy-workspace");
+    const params = createParams(sessionFile, workspaceDir);
+    const fixture = await createLeasedCodexLifecycleHarness({
+      agentDir: path.join(tempDir, "agent"),
+      respond: createFixedThreadRequest("protected-policy", ["thread/start", "thread/resume"]),
+    });
+    const common = { client: fixture.client, params, userMcpServersEnabled: false };
+    const started = await startOrResumeThread(common);
+    await expect(retainThread(fixture.client, started)).resolves.toBe(true);
+    const unprotect = clientRuntime.protectCodexAppServerLiveThread(
+      fixture.client,
+      started.threadId,
+    );
+    const waiting = createDeferred<void>();
+    const originalWait = clientRuntime.waitForCodexAppServerThreadProtection;
+    const observeWait = vi
+      .spyOn(clientRuntime, "waitForCodexAppServerThreadProtection")
+      .mockImplementation((...args) => {
+        const pending = originalWait(...args);
+        waiting.resolve();
+        return pending;
+      });
+    params.pluginHarnessToolPolicySafeDeniedTools = ["image_generate"];
+    try {
+      const resumed = startOrResumeThread(common);
+      // Observe the real waiter, never replace its ownership decision or result.
+      await Promise.race([waiting.promise, resumed]);
+      expect(fixture.request.mock.calls.some(([method]) => method === "thread/unsubscribe")).toBe(
+        false,
+      );
+      unprotect(); // Native monitor releases this pin before entering completion delivery.
+      await expect(resumed).resolves.toMatchObject({
+        threadId: started.threadId,
+        lifecycle: { action: "resumed" },
+      });
+      expect(fixture.request.mock.calls.map(([method]) => method)).toEqual(WARM_RESUME_METHODS);
+      expect(
+        fixture.request.mock.calls.find(([method]) => method === "thread/resume")?.[1],
+      ).toMatchObject({
+        config: { "features.image_generation": false },
+      });
+    } finally {
+      unprotect();
+      observeWait.mockRestore();
+    }
   });
 
   it("keeps a warm native session across sticky environment selection changes", async () => {

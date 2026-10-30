@@ -44,6 +44,7 @@ type ClientRuntime = ThreadOwnershipState &
     context: ClientRuntimeContext;
     authHandoff?: CodexAppServerAuthHandoff;
     evictionTimer?: ReturnType<typeof setTimeout>;
+    protectionWaiters: Map<string, Set<() => void>>;
   };
 
 /** Match Codex's native grace window without retaining inactive conversations indefinitely. */
@@ -134,6 +135,7 @@ export function ensureCodexAppServerClientRuntime(
     claimedThreads: new Map(),
     releasingThreads: new Map(),
     protectedThreads: new Map(),
+    protectionWaiters: new Map(),
     sessionMetadata: new Map(),
     workspaceReferences: new Map(),
   };
@@ -153,6 +155,9 @@ export function ensureCodexAppServerClientRuntime(
       invalidateThreadOwnership(runtime, threadId);
     }
     runtime.protectedThreads.clear();
+    for (const waiters of runtime.protectionWaiters.values()) {
+      for (const wake of [...waiters]) wake();
+    }
     runtime.sessionMetadata.clear();
     runtime.workspaceReferences.clear();
   });
@@ -742,6 +747,41 @@ export async function releaseCodexAppServerLiveThread(
     : false;
 }
 
+/** Cold resume must wait for native children, not unsubscribe their parent connection. */
+export async function waitForCodexAppServerThreadProtection(
+  client: CodexAppServerClient,
+  threadId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const runtime = configuredClients.get(client);
+  signal?.throwIfAborted();
+  if (!runtime) return;
+  while (!runtime.closed && runtime.protectedThreads.has(threadId)) {
+    await new Promise<void>((resolve, reject) => {
+      const waiters = runtime.protectionWaiters.get(threadId) ?? new Set<() => void>();
+      runtime.protectionWaiters.set(threadId, waiters);
+      const cleanup = () => {
+        waiters.delete(wake);
+        if (waiters.size === 0) runtime.protectionWaiters.delete(threadId);
+        signal?.removeEventListener("abort", abort);
+      };
+      const wake = () => {
+        cleanup();
+        resolve();
+      };
+      const abort = () => {
+        cleanup();
+        reject(signal?.reason);
+      };
+      waiters.add(wake);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+    signal?.throwIfAborted();
+  }
+  if (runtime.closed)
+    throw client.getCloseError() ?? new Error("Codex app-server client is closed");
+}
+
 /** Native child work pins its parent's subscription even after the foreground parent turn ends. */
 export function protectCodexAppServerLiveThread(
   client: CodexAppServerClient,
@@ -763,6 +803,7 @@ export function protectCodexAppServerLiveThread(
       return;
     }
     if (releaseThreadProtection(runtime, threadId)) {
+      for (const wake of [...(runtime.protectionWaiters.get(threadId) ?? [])]) wake();
       const retained = runtime.retainedThreads.get(threadId);
       if (retained) {
         // A detached child is live activity, not parent idleness. Its terminal

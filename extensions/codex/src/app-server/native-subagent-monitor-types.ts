@@ -99,7 +99,10 @@ export type ParentOwner = {
   nativeReviewRequirement?: { required: boolean };
   claimDirectChild?: (threadId: string) => (() => void) | undefined;
   rejectPendingDirectChild?: (threadId: string, reason: string) => void;
-  onDirectChildAccepted?: () => void;
+  onDirectChildAccepted?: (handoff?: {
+    runId: string;
+    completionCustody?: AgentHarnessCompletionCustody;
+  }) => void;
 };
 
 export type ParentRegistrationHandle = {

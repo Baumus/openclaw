@@ -13,6 +13,7 @@ import {
   isCodexAppServerLiveThreadClaimed,
   isCodexAppServerLiveThreadProtected,
   releaseCodexAppServerLiveThread,
+  waitForCodexAppServerThreadProtection,
 } from "./client-runtime.js";
 import {
   isCodexAppServerThreadTerminalNotification,
@@ -196,12 +197,21 @@ export async function releaseCodexBoundLiveThread(
     }
   }
   try {
-    if (
-      isCodexAppServerLiveThreadClaimed(client, options.threadId) ||
-      isCodexAppServerLiveThreadProtected(client, options.threadId)
-    ) {
+    if (isCodexAppServerLiveThreadClaimed(client, options.threadId)) {
       throw new Error(`Codex thread ${options.threadId} is claimed by active work; stop it first.`);
     }
+    // Child settlement releases protection before delivering its completion to this session.
+    // The request signal bounds this wait; a cancelled request never cancels native children.
+    do {
+      await waitForCodexAppServerThreadProtection(client, options.threadId, options.signal);
+      options.signal?.throwIfAborted();
+      options.assertCurrent?.();
+      if (isCodexAppServerLiveThreadClaimed(client, options.threadId)) {
+        throw new Error(
+          `Codex thread ${options.threadId} is claimed by active work; stop it first.`,
+        );
+      }
+    } while (isCodexAppServerLiveThreadProtected(client, options.threadId));
     return await releaseCodexRetainedLiveThread({
       ...options,
       client,

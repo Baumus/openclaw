@@ -99,7 +99,13 @@ describe("CodexNativeSubagentMonitor", () => {
       );
       onTestFinished(() => resumed.release());
       await second.unregister();
-      await expect(releaseForResume()).rejects.toThrow("claimed by active work; stop it first");
+      let released = false;
+      const release = releaseForResume().then((result) => {
+        released = true;
+        return result;
+      });
+      await Promise.resolve();
+      expect(released).toBe(false);
       if (status === "interrupted") {
         resumed.cancel();
         expect(() => resumed.assertCurrent()).toThrow("execution was cancelled");
@@ -114,7 +120,7 @@ describe("CodexNativeSubagentMonitor", () => {
               : [],
         }),
       );
-      await expect(releaseForResume()).resolves.toBe(true);
+      await expect(release).resolves.toBe(true);
     },
   );
 

@@ -622,11 +622,18 @@ it.each([true, false])(
         threadId: "parent-thread",
         lifecycleTiming: createCodexThreadLifecycleTimingTracker({ enabled: false }),
       });
-    await expect(releaseForResume()).rejects.toThrow("claimed by active work; stop it first");
+    let released = false;
+    const release = releaseForResume().then((result) => {
+      released = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(released).toBe(false);
+    expect(isCodexAppServerLiveThreadProtected(client.client, "parent-thread")).toBe(true);
     const receipt = structuredClone(submissionStore.read());
     await completeTurn(client, "turn-b", "result B");
 
-    await expect(releaseForResume()).resolves.toBe(true);
+    await expect(release).resolves.toBe(true);
     expect(holds.parent).toBe(0);
     expect(isCodexAppServerLiveThreadProtected(client.client, "child-thread")).toBe(false);
     expect(submissionStore.read()).toEqual(receipt);

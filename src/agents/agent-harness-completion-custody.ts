@@ -9,6 +9,7 @@ import { retainGatewayRootWorkAdmissionContinuationScope } from "../process/gate
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import {
   assertAgentHarnessCompletionScope,
+  recordAgentHarnessCompletionHandoff,
   type AgentHarnessCompletionScope,
 } from "./agent-harness-completion-scope.js";
 import { loadRequesterSessionEntry } from "./subagents/announce/subagent-announce-delivery.js";
@@ -220,4 +221,20 @@ export function isAgentHarnessCompletionCustodyCurrent(
   } catch {
     return false;
   }
+}
+
+/** Records an accepted native assignment while its requester and completion custody are live. */
+export function registerAgentHarnessCompletionHandoff(params: {
+  scope: AgentHarnessCompletionScope;
+  completionCustody: AgentHarnessCompletionCustody;
+  runId: string;
+}): void {
+  const scope = assertAgentHarnessCompletionScope(params.scope);
+  const runId = params.runId.trim();
+  if (!runId) throw new Error("Harness completion handoff requires an assignment run ID");
+  getCompletionOwner(params.completionCustody, scope).run(() => {
+    recordAgentHarnessCompletionHandoff(scope, runId, () =>
+      isAgentHarnessCompletionCustodyCurrent(params.completionCustody, scope),
+    );
+  });
 }
